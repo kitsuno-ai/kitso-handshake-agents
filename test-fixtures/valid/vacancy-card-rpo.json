@@ -1,0 +1,37 @@
+{
+  "kitso.handshake.v1": {
+    "principal_type": "rpo",
+    "vacancy": {
+      "role_title": "Backend Engineer (SaaS platform)",
+      "role_family": "software_engineering",
+      "seniority": "senior",
+      "employment_type": "permanent",
+      "geography": { "country": "DE", "city": "Berlin", "remote_policy": "fully_remote" },
+      "compensation": {
+        "disclosed_in_invitation": false,
+        "range": { "min": 90000, "max": 120000, "currency": "EUR", "period": "year" },
+        "disclosure_trigger": "after_seeker_accepts_invitation"
+      },
+      "must_haves": ["python_or_go", "5y+_backend_experience"],
+      "nice_to_haves": ["aws", "postgres"],
+      "ttl": "2026-09-01T00:00:00Z"
+    },
+    "hiring_entity": {
+      "represented_via_rpo": true,
+      "rpo_name": "Acme RPO",
+      "underlying_entity_disclosed": false,
+      "disclosure_trigger": "after_seeker_accepts_invitation",
+      "industry": "saas",
+      "size_band": "201-500"
+    },
+    "consent_policy": {
+      "agent_may_invite_without_human_review": false,
+      "human_in_loop_role": "rpo_owner"
+    },
+    "provenance": {
+      "tier": "domain_verified",
+      "domain": "acme-rpo.com",
+      "agent_dns": "rpo-acme.agent"
+    }
+  }
+}

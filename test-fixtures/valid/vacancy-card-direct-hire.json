@@ -1,0 +1,54 @@
+{
+  "kitso.handshake.v1": {
+    "principal_type": "hiring_entity",
+    "vacancy": {
+      "role_title": "Social Media Specialist",
+      "role_family": "social_media_marketing",
+      "seniority": "mid_to_senior",
+      "employment_type": "contract",
+      "geography": {
+        "country": "RO",
+        "remote_policy": "fully_remote"
+      },
+      "compensation": {
+        "disclosed_in_invitation": true,
+        "range": {
+          "min": 1500,
+          "max": 3000,
+          "currency": "EUR",
+          "period": "month"
+        }
+      },
+      "must_haves": [
+        "german_and_english_written_fluency",
+        "owns_brand_or_founder_socials_track_record",
+        "creator_tools_minimum_three_of_publer_midjourney_pixverse_elevenlabs_canva_figma_notion_n8n",
+        "comfortable_with_ai_as_collaborator_not_hidden_dependency",
+        "independent_propose_execute_report"
+      ],
+      "nice_to_haves": [
+        "french_or_romanian",
+        "swiss_german_register_familiarity",
+        "experience_with_founder_voice_brands",
+        "video_production_taste_beyond_template"
+      ],
+      "ttl": "2026-07-31T23:59:59Z"
+    },
+    "hiring_entity": {
+      "name_disclosed_in_invitation": true,
+      "name": "Kitsuno",
+      "industry": "agentic_career_platform",
+      "size_band": "1-10",
+      "represented_via_rpo": false
+    },
+    "consent_policy": {
+      "agent_may_invite_without_human_review": false,
+      "human_in_loop_role": "founder"
+    },
+    "provenance": {
+      "tier": "domain_verified",
+      "domain": "kitsuno.ai",
+      "agent_dns": "kitsuno.agent"
+    }
+  }
+}

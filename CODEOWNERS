@@ -1,0 +1,10 @@
+# Code owners for this repo. Used by GitHub for automatic review requests.
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+* @kitsuno-ai/core
+
+# Security-sensitive files require an extra review
+SECURITY.md @kitsuno-ai/core
+compliance-checklist.md @kitsuno-ai/core
+packages/*/src/**/moltbook_client.py @kitsuno-ai/core
+packages/*/src/**/cards.py @kitsuno-ai/core

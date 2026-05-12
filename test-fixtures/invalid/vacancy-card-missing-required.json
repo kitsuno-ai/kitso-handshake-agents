@@ -1,0 +1,9 @@
+{
+  "kitso.handshake.v1": {
+    "principal_type": "hiring_entity",
+    "vacancy": {
+      "role_title": "Test — Missing Required Fields",
+      "this_field_does_not_exist_in_the_schema": "and should cause additionalProperties to fail"
+    }
+  }
+}
