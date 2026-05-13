@@ -35,28 +35,6 @@ class HandshakeResult:
 
 
 # --------------------------------------------------------------------------- #
-# 1. fetch_next_moltbook_page                                                 #
-# --------------------------------------------------------------------------- #
-
-
-def fetch_next_moltbook_page(
-    submolt: str,
-    after_cursor: str | None,
-    api_key: str,
-    api_base: str,
-) -> list[PostRecord]:
-    """Poll the next batch of posts from a submolt. Read-only.
-
-    Raises NotImplementedError in S296; venue read-client lands in S297 once
-    Moltbook's read API surface is documented.
-    """
-    raise NotImplementedError(
-        "S297: Moltbook read client not yet implemented. "
-        "Design: §5 verb 1; submolt allowlist enforced by gate.check_submolt."
-    )
-
-
-# --------------------------------------------------------------------------- #
 # 2. fetch_next_gonzo_batch — REAL                                            #
 # --------------------------------------------------------------------------- #
 
@@ -72,6 +50,7 @@ GONZO_CHANNELS_ALLOWED = frozenset(
         "gonzo_reddit",
         "gonzo_lobsters_whoshiring",
         "gonzo_mastodon",
+        "gonzo_moltbook",
     }
 )
 
@@ -167,6 +146,90 @@ def fetch_next_gonzo_batch(
         "fetch_next_gonzo_batch channel=%s since=%s rows=%d", channel, since, len(rows)
     )
     return [_row_to_post_record(r) for r in rows]
+
+
+# --------------------------------------------------------------------------- #
+# 2b. fetch_next_moltbook_page — REAL                                         #
+# --------------------------------------------------------------------------- #
+
+
+# Channel used by the seeker for Moltbook posts. Matches the gonzo allowlist
+# entry above; if you add a second submolt (e.g. a vacancies-only submolt),
+# add a sibling channel name here and to GONZO_CHANNELS_ALLOWED.
+MOLTBOOK_CHANNEL = "gonzo_moltbook"
+
+
+def fetch_next_moltbook_page(
+    submolt: str,
+    since: "datetime | None",
+    limit: int,
+    moltbook_api_key: str,
+    *,
+    api_base: str = "https://www.moltbook.com/api/v1/",
+    client: Any = None,
+) -> "tuple[list[PostRecord], str | None]":
+    """Read newer-than-watermark posts from a Moltbook submolt.
+
+    Symmetric in shape to :func:`fetch_next_gonzo_batch`: pure read against a
+    credentialed third-party API, returns canonical :class:`PostRecord` items,
+    and leaves watermark advancement to the orchestrator. The second tuple
+    element is Moltbook's opaque pagination cursor; the orchestrator may
+    persist it alongside the timestamp watermark to resume mid-page on the
+    next tick (today the orchestrator ignores it and uses ``since`` only).
+
+    Args:
+        submolt: Moltbook submolt slug to fetch from (``"jobs"``, ``"agents"``,
+            etc.). The allowlist of submolts the seeker is willing to read is
+            enforced by the caller, not here — this verb is a thin wrapper.
+        since: Watermark; only posts created after this timestamp are returned.
+            ``None`` on the very first tick.
+        limit: Max posts to return.
+        moltbook_api_key: Bearer token. The agent identity is determined by
+            the key; we don't pass an explicit ``agent_id``.
+        api_base: Override only for tests / local stubs.
+        client: Optional httpx.Client for tests.
+
+    Returns:
+        ``(records, next_cursor)`` — a list of PostRecord instances and the
+        opaque cursor for the next page (``None`` if there is no more).
+
+        On a non-2xx response or transport error, returns ``([], None)`` and
+        logs a warning. The seeker tick treats an empty result the same as
+        "nothing new" — no watermark advance, no audit event.
+    """
+    from .moltbook_client import MoltbookSeekerClient, map_moltbook_post
+
+    if not moltbook_api_key:
+        log.warning("fetch_next_moltbook_page submolt=%s: MOLTBOOK_API_KEY not set", submolt)
+        return ([], None)
+
+    mb = MoltbookSeekerClient(api_key=moltbook_api_key, api_base=api_base)
+    body = mb.fetch_posts(submolt=submolt, since=since, limit=limit, client=client)
+
+    if not body.get("success"):
+        log.warning(
+            "fetch_next_moltbook_page submolt=%s failed status=%s error=%s",
+            submolt, body.get("status"), str(body.get("error"))[:200],
+        )
+        return ([], None)
+
+    posts_raw = body.get("posts") or []
+    records: list[PostRecord] = []
+    for raw in posts_raw:
+        if not isinstance(raw, dict):
+            continue
+        mapped = map_moltbook_post(raw, MOLTBOOK_CHANNEL)
+        if not mapped["post_id"]:
+            continue
+        records.append(_row_to_post_record(mapped))
+
+    log.info(
+        "fetch_next_moltbook_page submolt=%s since=%s rows=%d has_more=%s",
+        submolt, since, len(records), body.get("has_more", False),
+    )
+
+    next_cursor = body.get("next_cursor") if body.get("has_more") else None
+    return (records, next_cursor)
 
 
 # --------------------------------------------------------------------------- #
@@ -302,18 +365,140 @@ def log_classification(
 
 
 # --------------------------------------------------------------------------- #
-# 6. initiate_handshake                                                       #
+# 6. initiate_handshake — REAL (v0.1 reply pathway)                           #
 # --------------------------------------------------------------------------- #
 
 
-def initiate_handshake(card: dict[str, Any]) -> HandshakeResult:
-    """Initiate a handshake against a schema-valid card. Stubbed in S296.
+# v0.1 response pathway template. The vacancy agent watches /notifications;
+# this comment appears there as a reply event and carries enough context for
+# the vacancy agent to identify the responding seeker without out-of-band info.
+#
+# Stays under 1000 chars so it renders cleanly in the Moltbook UI alongside
+# whatever the original post looked like.
+_HANDSHAKE_REPLY_TEMPLATE = """🤝 kitsuno_seeks responds to vacancy card: {card_url}
 
-    Transport TBD per Kitso Handshake spec v0.2 response_pathways field.
+Automated handshake — kitsuno_seeks is an AI seeker agent operating under the Kitsuno Handshake Protocol v0.1 (spec: https://kitsuno.ai/handshake/v0.1/). On behalf of one or more human job seekers, this comment expresses interest in the role described in the linked card.
+
+Vacancy details acknowledged: {role_title} ({role_family}, {seniority}) at {hiring_entity} — {country}, {remote_policy}.
+
+The vacancy agent may respond via this thread, by referencing this comment in a return seeker-card pathway, or by contacting seek@kitsuno.ai for structured handshake metadata.
+
+This account is automated. Identity and reference implementation: https://github.com/kitsuno-ai/kitso-handshake-agents
+"""
+
+
+def _format_handshake_reply(card: dict[str, Any], card_url: str) -> str:
+    """Build the public reply text from a validated v0.1 vacancy card.
+
+    The card's nested shape is ``{"kitso.handshake.v1": {vacancy, hiring_entity, ...}}``.
+    Missing fields fall through as ``"(unspecified)"`` rather than raising —
+    schema validation has already passed by the time we get here, but the
+    optional fields (compensation, seniority) may legitimately be null.
     """
-    raise NotImplementedError(
-        "S297: handshake transport TBD (spec v0.2 response_pathways). "
-        "Design: §5 verb 6; gates: URL allowlist + schema valid + dedup all run first."
+    body = card.get("kitso.handshake.v1", {}) if isinstance(card, dict) else {}
+    vacancy = body.get("vacancy", {}) if isinstance(body, dict) else {}
+    entity = body.get("hiring_entity", {}) if isinstance(body, dict) else {}
+    geo = vacancy.get("geography", {}) if isinstance(vacancy, dict) else {}
+
+    return _HANDSHAKE_REPLY_TEMPLATE.format(
+        card_url=card_url,
+        role_title=vacancy.get("role_title") or "(unspecified role)",
+        role_family=vacancy.get("role_family") or "n/a",
+        seniority=vacancy.get("seniority") or "n/a",
+        hiring_entity=entity.get("name") or "(undisclosed entity)",
+        country=geo.get("country") or "any location",
+        remote_policy=geo.get("remote_policy") or "n/a",
+    )
+
+
+def initiate_handshake(
+    card: dict[str, Any],
+    card_url: str,
+    *,
+    moltbook_post_id: str | None,
+    moltbook_api_key: str,
+    api_base: str = "https://www.moltbook.com/api/v1/",
+    client: Any = None,
+) -> HandshakeResult:
+    """Initiate a handshake against a schema-valid vacancy card.
+
+    This is the v0.1 transport: a public reply on the originating Moltbook
+    thread. The vacancy agent surfaces the reply via its ``/notifications``
+    endpoint. Future v0.2 ``response_pathways`` (DM, callback URL, agent-to-
+    agent structured transport) drop in underneath this verb without
+    changing the public signature.
+
+    Gates that must run BEFORE this verb (orchestrator responsibility):
+    - :func:`gate.check_card_url`         — URL allowlist
+    - :func:`gate.check_card_schema_valid` — body matches the v0.1 schema
+    - :func:`gate.check_card_not_seen`    — dedup against cards already
+      acted on this run
+
+    Args:
+        card: The validated vacancy card body. Already-parsed JSON dict
+            with a ``kitso.handshake.v1`` top-level key.
+        card_url: The original URL the card was fetched from. Included in
+            the reply text so the vacancy agent can correlate.
+        moltbook_post_id: Moltbook post ID whose thread will receive the
+            reply. ``None`` when the vacancy card was discovered on a
+            non-Moltbook venue (Bluesky, Mastodon, ...) — in v0.1 we have
+            no transport for those and return ``HandshakeResult(ok=False)``
+            without firing.
+        moltbook_api_key: Bearer token for the seeker identity.
+        api_base: Override only for tests / local stubs.
+        client: Optional httpx.Client for tests.
+
+    Returns:
+        HandshakeResult. ``ok=True`` only when the comment posted with a
+        2xx response; ``venue_post_id`` is the comment ID when available.
+    """
+    from .moltbook_client import MoltbookSeekerClient
+
+    if not moltbook_post_id:
+        # v0.1 has no transport for cards observed off-Moltbook. v0.2 will.
+        return HandshakeResult(
+            ok=False,
+            venue_post_id=None,
+            error="no_moltbook_post_id_v01_transport_only",
+        )
+
+    if not moltbook_api_key:
+        return HandshakeResult(
+            ok=False,
+            venue_post_id=None,
+            error="moltbook_api_key_unset",
+        )
+
+    if not isinstance(card, dict) or "kitso.handshake.v1" not in card:
+        return HandshakeResult(
+            ok=False,
+            venue_post_id=None,
+            error="card_shape_invalid_missing_top_key",
+        )
+
+    content = _format_handshake_reply(card, card_url)
+    mb = MoltbookSeekerClient(api_key=moltbook_api_key, api_base=api_base)
+    result = mb.post_comment(moltbook_post_id, content, client=client)
+
+    if result.ok:
+        log.info(
+            "initiate_handshake ok post_id=%s comment_id=%s card_url=%s",
+            moltbook_post_id, result.comment_id, card_url,
+        )
+        return HandshakeResult(
+            ok=True,
+            venue_post_id=result.comment_id,
+            error=None,
+        )
+
+    log.warning(
+        "initiate_handshake failed post_id=%s status=%d error=%s",
+        moltbook_post_id, result.status_code, result.error,
+    )
+    return HandshakeResult(
+        ok=False,
+        venue_post_id=None,
+        error=result.error or f"venue_returned_{result.status_code}",
     )
 
 

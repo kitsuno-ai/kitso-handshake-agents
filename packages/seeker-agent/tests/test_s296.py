@@ -228,6 +228,7 @@ def test_gonzo_channels_allowed_matches_design():
         "gonzo_reddit",
         "gonzo_lobsters_whoshiring",
         "gonzo_mastodon",
+        "gonzo_moltbook",
     })
 
 
