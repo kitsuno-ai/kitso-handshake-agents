@@ -177,7 +177,15 @@ def cli() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    settings = Settings()
+    try:
+        settings = Settings.load()
+    except PermissionError as exc:
+        log.error("credentials file unusable: %s", exc)
+        _audit(
+            {"event": "credentials_file_refused", "error": str(exc)},
+            audit_db_url=None,
+        )
+        return 5
     return post_vacancy(
         card_path=args.card,
         submolt=args.submolt,

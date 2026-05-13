@@ -37,7 +37,7 @@ class MoltbookClient:
     def __init__(
         self,
         api_key: str,
-        api_base: str = "https://api.moltbook.com/v1/",
+        api_base: str = "https://www.moltbook.com/api/v1/",
         rate_limit_seconds: int = 1800,
         user_agent: str = "kitso-handshake-vacancy-agent/0.1.0 (+https://github.com/kitsuno-ai/kitso-handshake-agents)",
     ):
@@ -48,6 +48,11 @@ class MoltbookClient:
         self._rate_limit_seconds = rate_limit_seconds
         self._user_agent = user_agent
         self._last_post_at: float = 0.0
+
+    @property
+    def post_url(self) -> str:
+        """The fully-resolved URL the client will POST to."""
+        return self._api_base + "posts"
 
     def post(
         self,
@@ -76,7 +81,7 @@ class MoltbookClient:
                 error=f"rate_limited: would need to wait {wait:.0f}s",
             )
 
-        url = self._api_base + "posts"
+        url = self.post_url
         payload = {"submolt": submolt, "title": title, "content": content}
         headers = {
             "Authorization": f"Bearer {self._api_key}",
