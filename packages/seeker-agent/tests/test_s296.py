@@ -577,3 +577,38 @@ def test_build_provider_cloudflare_not_yet_wired(monkeypatch):
     s = Settings()
     with pytest.raises(NotImplementedError, match="S297"):
         _build_provider(s, force_echo=False)
+
+def test_mistral_provider_retries_on_429(httpx_mock):
+    """First call: 429. Second call: 200. Provider should retry and succeed."""
+    httpx_mock.add_response(
+        url="https://api.mistral.ai/v1/chat/completions",
+        status_code=429,
+        headers={"retry-after": "1"},
+        text='{"error":"rate_limited"}',
+    )
+    httpx_mock.add_response(
+        url="https://api.mistral.ai/v1/chat/completions",
+        json=_mistral_response(json.dumps(_valid_classification_dict())),
+    )
+    provider = MistralProvider(api_key="k", min_gap_seconds=0)
+    result = provider.classify(_post("hiring"))
+    assert result.is_job_shaped is True
+    # Two requests made (the retry + the success)
+    requests = httpx_mock.get_requests()
+    assert len(requests) == 2
+
+
+def test_mistral_provider_gives_up_after_3_retries(httpx_mock):
+    """Four consecutive 429s should raise MistralError (we retry 3 times)."""
+    for _ in range(4):
+        httpx_mock.add_response(
+            url="https://api.mistral.ai/v1/chat/completions",
+            status_code=429,
+            headers={"retry-after": "0.1"},
+            text='{"error":"rate_limited"}',
+        )
+    provider = MistralProvider(api_key="k", min_gap_seconds=0)
+    with pytest.raises(MistralError, match="429"):
+        provider.classify(_post("x"))
+    requests = httpx_mock.get_requests()
+    assert len(requests) == 4

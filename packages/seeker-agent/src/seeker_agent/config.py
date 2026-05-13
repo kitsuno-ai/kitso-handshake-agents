@@ -1,17 +1,9 @@
 """Configuration for the Seeker Agent.
 
-All settings are loaded from environment variables. The agent runs in two
-arms (moltbook + gonzo) which can be enabled independently; either arm can
-be active for dry-run without LLM credentials, but a live run requires the
-provider's credentials and the kill token.
-
-Per the design doc §14 (resolved S295), the agent uses **free tier only**:
-Mistral primary, Cloudflare Workers AI as failover. ``SEEKER_LLM_PROVIDER``
-is the switch.
-
-Credentials that don't fit in env vars (PG URLs with embedded passwords)
-live in a JSON file at ``$HOME/.config/seeker/credentials.json`` (mode 0600).
-See :func:`_load_seeker_credentials_file` and :meth:`Settings.load`.
+All settings are loaded from environment variables, with optional fallback to
+``$HOME/.config/seeker/credentials.json`` (mode 0600) for keys that don't fit
+in env vars: PG URLs with embedded passwords, and the Mistral API key when
+the agent runs from cron (where env-from-container isn't available).
 """
 
 from __future__ import annotations
@@ -34,7 +26,7 @@ ConnectMode = Literal["host", "internal"]
 
 
 # --------------------------------------------------------------------------- #
-# Credentials file loader (parallel to vacancy-agent's pattern)              #
+# Credentials file loader                                                     #
 # --------------------------------------------------------------------------- #
 
 
@@ -44,25 +36,20 @@ def _load_seeker_credentials_file(
 ) -> dict | None:
     """Load the seeker's credentials JSON.
 
-    Default path: ``$HOME/.config/seeker/credentials.json``. Expected shape::
+    Default path: ``$HOME/.config/seeker/credentials.json``. Expected shape
+    (any subset may be present)::
 
         {
-          "sf4l_prod_readonly_url_internal": "postgresql://seeker_ro:...@sf4l-postgres-prod:5432/sf4l_prod",
-          "sf4l_prod_readonly_url_host":     "postgresql://seeker_ro:...@127.0.0.1:5434/sf4l_prod",
-          "experiment_db_url_internal":      "postgresql://seeker_writer:...@experiment-db-postgres:5432/kitso_handshake_experiment",
-          "experiment_db_url_host":          "postgresql://seeker_writer:...@127.0.0.1:5435/kitso_handshake_experiment",
-          "role": "seeker_ro",
-          "experiment_role": "seeker_writer"
+          "sf4l_prod_readonly_url_internal": "...",
+          "sf4l_prod_readonly_url_host":     "...",
+          "experiment_db_url_internal":      "...",
+          "experiment_db_url_host":          "...",
+          "mistral_api_key":                 "..."
         }
 
-    Returns a dict with resolved URLs (host vs internal per ``prefer``),
-    or ``None`` if the file is absent. Raises ``PermissionError`` if the
-    file is world- or group-readable.
-
-    Either URL may be absent from the file — callers should check for
-    ``sf4l_prod_readonly_url`` and ``experiment_db_url`` independently.
-    Returns ``None`` only when BOTH URL keys are absent (the file is then
-    useless to this loader).
+    Returns a dict with the prefer-resolved URLs plus mistral_api_key,
+    or ``None`` if the file is absent or has no recognised keys. Raises
+    ``PermissionError`` if the file is world- or group-readable.
     """
     if creds_path is None:
         home = Path(os.environ.get("HOME") or Path.home())
@@ -87,6 +74,7 @@ def _load_seeker_credentials_file(
         return None
 
     out: dict = {}
+
     sf4l_key = f"sf4l_prod_readonly_url_{prefer}"
     if sf4l_key in data and isinstance(data[sf4l_key], str):
         out["sf4l_prod_readonly_url"] = data[sf4l_key]
@@ -95,11 +83,12 @@ def _load_seeker_credentials_file(
     if exp_key in data and isinstance(data[exp_key], str):
         out["experiment_db_url"] = data[exp_key]
 
+    if "mistral_api_key" in data and isinstance(data["mistral_api_key"], str):
+        out["mistral_api_key"] = data["mistral_api_key"]
+
     if not out:
-        # Neither URL present — the file has no value to us
         return None
 
-    # Pass through any other known fields
     for k in ("role", "experiment_role"):
         if k in data:
             out[k] = data[k]
@@ -122,42 +111,22 @@ class Settings(BaseSettings):
 
     # --- LLM provider ----------------------------------------------------- #
 
-    seeker_llm_provider: LLMProvider = Field(
-        default="mistral",
-        description="Which LLM provider the classifier calls. Both must be free tier.",
-    )
+    seeker_llm_provider: LLMProvider = Field(default="mistral")
     mistral_api_key: str | None = Field(default=None)
     mistral_api_base: str = Field(default="https://api.mistral.ai/v1")
-    mistral_model: str = Field(
-        default="mistral-small-latest",
-        description="Mistral model id. Matches kitso_router canonical free-tier model.",
-    )
-    mistral_min_gap_seconds: float = Field(
-        default=1.0,
-        description="Free-tier rate limit: 1 req/s. Provider enforces; we pre-wait.",
-    )
+    mistral_model: str = Field(default="mistral-small-latest")
+    mistral_min_gap_seconds: float = Field(default=1.2)  # S298: 1.2s gives ~50 req/min headroom under Mistral free-tier 50/min cap
     cloudflare_api_token: str | None = Field(default=None)
     cloudflare_account_id: str | None = Field(default=None)
-    cloudflare_model: str = Field(
-        default="@cf/qwen/qwen1.5-14b-chat-awq",
-        description="Cloudflare Workers AI model slug. Tune as CF catalog evolves.",
-    )
+    cloudflare_model: str = Field(default="@cf/qwen/qwen1.5-14b-chat-awq")
 
     # --- Classifier behavior --------------------------------------------- #
 
-    seeker_relevance_threshold: float = Field(
-        default=0.7,
-        ge=0.0,
-        le=1.0,
-        description="Below this, all further verbs are gated.",
-    )
+    seeker_relevance_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
     classifier_temperature: float = Field(default=0.1, ge=0.0, le=1.0)
     classifier_timeout_seconds: float = Field(default=30.0, gt=0.0)
     classifier_prompt_version: str = Field(default="seeker-classifier-v0.2")
-    classifier_max_post_chars: int = Field(
-        default=8000,
-        description="Truncate longer posts before sending to LLM. Audit excerpt is 500 chars.",
-    )
+    classifier_max_post_chars: int = Field(default=8000)
 
     # --- Moltbook arm ----------------------------------------------------- #
 
@@ -169,14 +138,8 @@ class Settings(BaseSettings):
     # --- Gonzo arm -------------------------------------------------------- #
 
     gonzo_arm_enabled: bool = Field(default=True)
-    sf4l_prod_readonly_url: str | None = Field(
-        default=None,
-        description="Postgres URL for read-only access to sf4l_prod. Settings.load() can fill from credentials file.",
-    )
-    seeker_connect_mode: ConnectMode = Field(
-        default="host",
-        description="Which sf4l_prod URL to use from the credentials file (host vs internal docker network).",
-    )
+    sf4l_prod_readonly_url: str | None = Field(default=None)
+    seeker_connect_mode: ConnectMode = Field(default="host")
     gonzo_channels: str = Field(
         default=(
             "gonzo_hn_whoshiring,gonzo_bluesky,gonzo_telegram,"
@@ -200,10 +163,7 @@ class Settings(BaseSettings):
 
     # --- Persistence ----------------------------------------------------- #
 
-    experiment_db_url: str | None = Field(
-        default=None,
-        description="Postgres URL for the isolated experiment DB. Settings.load() can fill from credentials file.",
-    )
+    experiment_db_url: str | None = Field(default=None)
 
     # --- Kill switch ----------------------------------------------------- #
 
@@ -216,13 +176,7 @@ class Settings(BaseSettings):
 
     # --- Credentials file path ------------------------------------------- #
 
-    credentials_file: Path | None = Field(
-        default=None,
-        description=(
-            "Override path for seeker credentials JSON. "
-            "Default is $HOME/.config/seeker/credentials.json."
-        ),
-    )
+    credentials_file: Path | None = Field(default=None)
 
     # ===================================================================== #
 
@@ -268,19 +222,21 @@ class Settings(BaseSettings):
 
     @classmethod
     def load(cls) -> "Settings":
-        """Construct Settings, enriching from the seeker credentials file when env is silent.
+        """Construct Settings, enriching from the credentials file when env is silent.
 
-        Env vars always win. The credentials file is consulted only for keys
-        not already in the environment (``SF4L_PROD_READONLY_URL`` and
-        ``EXPERIMENT_DB_URL``).
+        Env vars always win. The credentials file fills sf4l_prod_readonly_url,
+        experiment_db_url, and mistral_api_key when env has them unset.
 
         Raises ``PermissionError`` if the credentials file exists but has
-        unsafe permissions; the agent must refuse to run in that case.
+        unsafe permissions.
         """
         s = cls()
-        needs_sf4l = s.sf4l_prod_readonly_url is None
-        needs_exp = s.experiment_db_url is None
-        if not (needs_sf4l or needs_exp):
+        needs = {
+            "sf4l_prod_readonly_url": s.sf4l_prod_readonly_url is None,
+            "experiment_db_url": s.experiment_db_url is None,
+            "mistral_api_key": s.mistral_api_key is None,
+        }
+        if not any(needs.values()):
             return s
 
         creds = _load_seeker_credentials_file(
@@ -291,10 +247,9 @@ class Settings(BaseSettings):
             return s
 
         updates: dict = {}
-        if needs_sf4l and creds.get("sf4l_prod_readonly_url"):
-            updates["sf4l_prod_readonly_url"] = creds["sf4l_prod_readonly_url"]
-        if needs_exp and creds.get("experiment_db_url"):
-            updates["experiment_db_url"] = creds["experiment_db_url"]
+        for key, missing in needs.items():
+            if missing and creds.get(key):
+                updates[key] = creds[key]
 
         if updates:
             log.info(

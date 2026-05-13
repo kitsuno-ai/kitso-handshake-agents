@@ -154,16 +154,36 @@ class MistralProvider:
         url = f"{self._api_base}/chat/completions"
 
         client = self._client or httpx.Client(timeout=self._timeout)
+        max_retries = 3
+        attempt = 0
         try:
-            resp = client.post(url, json=payload, headers=headers)
+            while True:
+                resp = client.post(url, json=payload, headers=headers)
+                if resp.status_code == 200:
+                    break
+                if resp.status_code == 429 and attempt < max_retries:
+                    # Respect Retry-After if present (seconds; Mistral usually sets "1")
+                    retry_after_hdr = resp.headers.get("retry-after", "")
+                    try:
+                        delay = float(retry_after_hdr)
+                    except (TypeError, ValueError):
+                        delay = 1.0
+                    # Jitter so concurrent processes don't synchronise
+                    delay = max(delay, 1.0) + 0.5
+                    log.info(
+                        "Mistral 429 (attempt %d/%d); sleeping %.1fs",
+                        attempt + 1, max_retries, delay,
+                    )
+                    time.sleep(delay)
+                    attempt += 1
+                    continue
+                # Non-429 error, or 429 after retries exhausted
+                raise MistralError(
+                    f"Mistral returned {resp.status_code}: {resp.text[:200]}"
+                )
         finally:
             if self._owns_client:
                 client.close()
-
-        if resp.status_code != 200:
-            raise MistralError(
-                f"Mistral returned {resp.status_code}: {resp.text[:200]}"
-            )
 
         body = resp.json()
         content = self._extract_content(body)
