@@ -14,7 +14,7 @@ set -u
 KILL_FILE="${SEEKER_KILL_FILE:-/tmp/seeker.kill}"
 PKG_DIR="${SEEKER_PKG_DIR:-/opt/kitso-handshake-agents/packages/seeker-agent}"
 SWEEP_TIMEOUT_S="${SEEKER_SWEEP_TIMEOUT_S:-600}"
-BATCH_SIZE="${SEEKER_BATCH_SIZE:-20}"
+BATCH_SIZE="${SEEKER_BATCH_SIZE:-8}"
 LOG_TAG="seeker-tick-all"
 
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }

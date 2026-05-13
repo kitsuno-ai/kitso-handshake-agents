@@ -615,8 +615,8 @@ def test_run_tick_lock_contention(monkeypatch, tmp_path, capsys):
 
 
 def test_audit_emit_to_stderr_when_no_db(capsys):
-    audit.emit({"event": "ping"}, experiment_db_url=None)
+    audit.emit({"event": "ping"}, db=None)
     err = capsys.readouterr().err
-    assert err.startswith("AUDIT ")
+    assert err.startswith("AUDIT-EVENT ")
     assert "\"event\": \"ping\"" in err
     assert "\"timestamp\"" in err

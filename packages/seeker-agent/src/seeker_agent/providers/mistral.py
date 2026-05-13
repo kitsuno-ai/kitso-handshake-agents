@@ -17,7 +17,8 @@ import logging
 import threading
 import time
 from importlib import resources
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Mapping
 
 import httpx
 
@@ -83,6 +84,28 @@ def _build_user_message(post: PostRecord, max_post_chars: int) -> str:
     )
 
 
+
+def _parse_rate_limit_headers(headers: "Mapping[str, str]") -> dict[str, Any]:
+    """Extract Mistral's ``x-ratelimit-*`` (and Retry-After) headers.
+
+    Captures whatever the response provides — no hard-coded names. Numeric
+    values are coerced to int when possible. Always includes ``observed_at``
+    (UTC ISO timestamp).
+    """
+    out: dict[str, Any] = {
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    for name, value in headers.items():
+        n = name.lower()
+        if n.startswith("x-ratelimit-") or n == "retry-after":
+            key = n.removeprefix("x-ratelimit-").replace("-", "_")
+            try:
+                out[key] = int(value)
+            except (TypeError, ValueError):
+                out[key] = value
+    return out
+
+
 class MistralProvider:
     """Free-tier Mistral classifier.
 
@@ -121,6 +144,8 @@ class MistralProvider:
         self._lock = threading.Lock()
         self._last_call_at: float = 0.0
         self._system_prompt = _build_system_message(prompt_template or _load_prompt_template())
+        # S299: rate-limit headers from the most recent 200 response
+        self._last_rate_limit: dict[str, Any] | None = None
 
     # --- Pacing ----------------------------------------------------------- #
 
@@ -133,6 +158,11 @@ class MistralProvider:
             self._last_call_at = time.monotonic()
 
     # --- Main call -------------------------------------------------------- #
+
+    @property
+    def last_rate_limit_observation(self) -> "dict[str, Any] | None":
+        """Most recent x-ratelimit-* headers from a 200, or None if not seen yet."""
+        return self._last_rate_limit
 
     def classify(self, post: PostRecord) -> Classification:
         self._wait_for_slot()
@@ -160,6 +190,8 @@ class MistralProvider:
             while True:
                 resp = client.post(url, json=payload, headers=headers)
                 if resp.status_code == 200:
+                    # S299: capture rate-limit headers on every successful call.
+                    self._last_rate_limit = _parse_rate_limit_headers(resp.headers)
                     break
                 if resp.status_code == 429 and attempt < max_retries:
                     # Respect Retry-After if present (seconds; Mistral usually sets "1")

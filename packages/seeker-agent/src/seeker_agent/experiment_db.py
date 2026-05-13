@@ -224,6 +224,36 @@ class ExperimentDB:
             self._conn.commit()
             return int(row[0]) if row else None
 
+    def log_audit_event(
+        self,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+        arm: str | None = None,
+        channel: str | None = None,
+        classification_id: int | None = None,
+    ) -> int | None:
+        """Append a row to audit_events. JSONB payload absorbs event-specific fields.
+
+        Used by :func:`audit.emit` for lifecycle + observability events
+        (rate_limit_observation, tick_complete, fetch_failed, etc).
+        """
+        if not self._enabled or self._conn is None:
+            return None
+        sql = """
+            INSERT INTO audit_events (
+                event_type, arm, channel, classification_id, payload
+            ) VALUES (%s, %s, %s, %s, %s::jsonb)
+            RETURNING id
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(
+                sql,
+                (event_type, arm, channel, classification_id, json.dumps(payload or {}, default=str)),
+            )
+            row = cur.fetchone()
+            self._conn.commit()
+            return int(row[0]) if row else None
+
     # ------------------------------------------------------------------ #
     # Watermarks                                                         #
     # ------------------------------------------------------------------ #

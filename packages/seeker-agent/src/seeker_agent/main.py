@@ -179,11 +179,12 @@ def run_tick(
     channel: str | None = None,
 ) -> int:
     """Run one tick against an explicit batch of posts."""
+    db = None  # S299: pre-bound; overwritten by the inner with-block
     decision = gate.check_kill_switch(settings.seeker_kill_file.exists())
     if not decision.allowed:
         audit.emit(
             {"event": "tick_aborted", "arm": arm, "reason": decision.reason},
-            settings.experiment_db_url,
+            db,
         )
         return 6
 
@@ -192,7 +193,7 @@ def run_tick(
         if missing:
             audit.emit(
                 {"event": "live_refused_missing_env", "arm": arm, "missing": missing},
-                settings.experiment_db_url,
+            db,
             )
             log.error("live mode requires env vars: %s", ", ".join(missing))
             return 3
@@ -223,7 +224,7 @@ def run_tick(
                                 "post_id": post.post_id,
                                 "error": f"{err_class}: {exc}",
                             },
-                            settings.experiment_db_url,
+            db,
                         )
                         db.log_error(
                             arm=arm,
@@ -237,6 +238,21 @@ def run_tick(
                         )
                         continue
 
+
+
+                    # S299: capture rate-limit headers from this Mistral call (if any)
+                    rl = getattr(provider, "last_rate_limit_observation", None)
+                    if rl:
+                        audit.emit(
+                            {
+                                "event": "rate_limit_observation",
+                                "arm": arm,
+                                "channel": post.submolt_or_channel,
+                                "provider": provider.name,
+                                **rl,
+                            },
+                            db,
+                        )
                     try:
                         validate_payload(classification.to_dict())
                     except Exception as exc:
@@ -263,7 +279,7 @@ def run_tick(
                     event = _process_classified_post(
                         classification, post, settings, cards_seen, db, classification_id,
                     )
-                    audit.emit(event, settings.experiment_db_url)
+                    audit.emit(event, db)
                     n_classified += 1
                     if post.observed_at and (max_observed_at is None or post.observed_at > max_observed_at):
                         max_observed_at = post.observed_at
@@ -279,26 +295,29 @@ def run_tick(
                         "advanced watermark arm=%s channel=%s to %s",
                         arm, channel, max_observed_at,
                     )
+
+                # S299: emit tick_complete INSIDE the with-block so it lands in audit_events
+                audit.emit(
+                    {
+                        "event": "tick_complete",
+                        "arm": arm,
+                        "channel": channel,
+                        "n_classified": n_classified,
+                        "n_dropped": n_dropped,
+                        "dry_run": dry_run,
+                        "watermark_advanced_to": max_observed_at if n_classified > 0 and channel else None,
+                    },
+                    db,
+                )
+
     except RuntimeError as exc:
         audit.emit(
             {"event": "tick_lock_contention", "arm": arm, "error": str(exc)},
-            settings.experiment_db_url,
+            None,
         )
         log.error("%s", exc)
         return 7
 
-    audit.emit(
-        {
-            "event": "tick_complete",
-            "arm": arm,
-            "channel": channel,
-            "n_classified": n_classified,
-            "n_dropped": n_dropped,
-            "dry_run": dry_run,
-            "watermark_advanced_to": max_observed_at if n_classified > 0 and channel else None,
-        },
-        settings.experiment_db_url,
-    )
     return 0
 
 
@@ -524,6 +543,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     Running all channels in one process shares the provider and respects the
     free-tier sliding window.
     """
+    db = None  # S299: pre-bound; overwritten by the inner with-block
     try:
         settings = Settings.load()
     except PermissionError as exc:
@@ -584,7 +604,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         if not posts:
             audit.emit(
                 {"event": "tick_complete", "arm": "gonzo", "channel": ch, "n_classified": 0, "n_dropped": 0, "dry_run": args.dry_run, "watermark_advanced_to": None},
-                settings.experiment_db_url,
+            db,
             )
             continue
 
@@ -616,7 +636,7 @@ def _run_tick_with_provider(
     if not decision.allowed:
         audit.emit(
             {"event": "tick_aborted", "arm": arm, "reason": decision.reason},
-            settings.experiment_db_url,
+            db,
         )
         return 6
 
@@ -625,7 +645,7 @@ def _run_tick_with_provider(
         if missing:
             audit.emit(
                 {"event": "live_refused_missing_env", "arm": arm, "missing": missing},
-                settings.experiment_db_url,
+            db,
             )
             log.error("live mode requires env vars: %s", ", ".join(missing))
             return 3
@@ -645,11 +665,26 @@ def _run_tick_with_provider(
                         err_class = type(exc).__name__
                         audit.emit(
                             {"event": "classifier_call_failed", "venue": post.venue, "post_id": post.post_id, "error": f"{err_class}: {exc}"},
-                            settings.experiment_db_url,
+            db,
                         )
                         db.log_error(arm=arm, channel=post.submolt_or_channel, verb="classify_post", error_class=err_class, error_message=str(exc))
                         continue
 
+
+
+                    # S299: capture rate-limit headers from this Mistral call (if any)
+                    rl = getattr(provider, "last_rate_limit_observation", None)
+                    if rl:
+                        audit.emit(
+                            {
+                                "event": "rate_limit_observation",
+                                "arm": arm,
+                                "channel": post.submolt_or_channel,
+                                "provider": provider.name,
+                                **rl,
+                            },
+                            db,
+                        )
                     try:
                         validate_payload(classification.to_dict())
                     except Exception as exc:
@@ -662,7 +697,7 @@ def _run_tick_with_provider(
 
                     classification_id = verbs.log_classification(classification, post, db)
                     event = _process_classified_post(classification, post, settings, cards_seen, db, classification_id)
-                    audit.emit(event, settings.experiment_db_url)
+                    audit.emit(event, db)
                     n_classified += 1
                     if post.observed_at and (max_observed_at is None or post.observed_at > max_observed_at):
                         max_observed_at = post.observed_at
@@ -675,15 +710,26 @@ def _run_tick_with_provider(
                 if n_classified > 0 and channel and max_observed_at:
                     db.advance_watermark(arm, channel, max_observed_at)
                     log.info("    advanced watermark %s/%s to %s", arm, channel, max_observed_at)
+
+                # S299: emit tick_complete INSIDE the with-block so it lands in audit_events
+                audit.emit(
+                    {
+                        "event": "tick_complete",
+                        "arm": arm,
+                        "channel": channel,
+                        "n_classified": n_classified,
+                        "n_dropped": n_dropped,
+                        "dry_run": dry_run,
+                        "watermark_advanced_to": max_observed_at if n_classified > 0 and channel else None,
+                    },
+                    db,
+                )
+
     except RuntimeError as exc:
-        audit.emit({"event": "tick_lock_contention", "arm": arm, "error": str(exc)}, settings.experiment_db_url)
+        audit.emit({"event": "tick_lock_contention", "arm": arm, "error": str(exc)}, None)
         log.error("%s", exc)
         return 7
 
-    audit.emit(
-        {"event": "tick_complete", "arm": arm, "channel": channel, "n_classified": n_classified, "n_dropped": n_dropped, "dry_run": dry_run, "watermark_advanced_to": max_observed_at if n_classified > 0 and channel else None},
-        settings.experiment_db_url,
-    )
     return 0
 
 
