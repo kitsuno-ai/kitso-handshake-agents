@@ -19,7 +19,6 @@ from pathlib import Path
 
 from .cards import extract_post_summary, validate_card
 from .config import Settings
-from .db import log_audit_event
 from .moltbook_client import MoltbookClient, PostResult
 
 log = logging.getLogger("vacancy_agent")
@@ -62,56 +61,17 @@ def _format_post_body(card: dict, card_url: str | None, jd_url: str | None) -> t
     return title, "\n".join(lines)
 
 
-# S305: event name normalization — map flat input event to (event_type, ok-flag)
-# tuple so Tenko can color and count events consistently across agents.
-_EVENT_TYPE_MAP = {
-    "validation_failed":            "vacancy_validation_failed",
-    "dry_run":                       "vacancy_dry_run",
-    "live_refused_missing_creds":   "vacancy_refused_missing_creds",
-    "rate_limited":                  "vacancy_rate_limited",
-}
-
-
-def _normalize_event_type(event: dict) -> str:
-    """Map the legacy 'event' field to a canonical audit_events.event_type.
-
-    Special case: 'post_attempted' splits into 'vacancy_posted' (ok=True) or
-    'vacancy_post_failed' (ok=False) so the success path is queryable.
-    """
-    name = event.get("event", "vacancy_unknown")
-    if name == "post_attempted":
-        return "vacancy_posted" if event.get("ok") else "vacancy_post_failed"
-    return _EVENT_TYPE_MAP.get(name, f"vacancy_{name}")
-
-
 def _audit(event: dict, audit_db_url: str | None) -> None:
-    """Append an audit record.
+    """Append an audit record. Stdout if no DB configured.
 
-    Always writes a single ``AUDIT-EVENT {...}`` line to stderr (grep-able).
-    When ``audit_db_url`` is set, also inserts one row into
-    ``audit_events`` (S305: closes TODO(s293)). DB failures never kill the post.
+    The audit shape is deliberately simple: a flat dict of strings + timestamps.
     """
     event["timestamp"] = datetime.now(timezone.utc).isoformat()
-
-    # stderr — always
-    print("AUDIT-EVENT " + json.dumps(event, default=str), file=sys.stderr, flush=True)
-
-    if not audit_db_url:
-        return
-
-    event_type = _normalize_event_type(event)
-    channel = event.get("submolt")  # use submolt name as channel
-    # Payload = everything except structural fields
-    structural = {"event", "submolt", "timestamp"}
-    payload = {k: v for k, v in event.items() if k not in structural}
-
-    log_audit_event(
-        audit_db_url,
-        event_type=event_type,
-        arm="vacancy",
-        channel=channel,
-        payload=payload,
-    )
+    if audit_db_url:
+        # TODO(s293): wire to experiment_db (isolated Postgres)
+        log.info("AUDIT-DB-PENDING %s", json.dumps(event))
+    else:
+        print("AUDIT " + json.dumps(event), file=sys.stderr)
 
 
 def _slug_from_card_path(card_path: Path) -> str:
