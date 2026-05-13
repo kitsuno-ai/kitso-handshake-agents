@@ -1,9 +1,14 @@
-"""Concrete classifier providers.
+"""Provider implementations for the seeker classifier."""
 
-Each provider implements :class:`seeker_agent.classifier.ClassifierProvider`
-and is selectable via the ``SEEKER_LLM_PROVIDER`` env var.
-"""
+from .cloudflare import CloudflareError, CloudflareProvider
+from .failover import FailoverExhausted, FailoverProvider
+from .mistral import MistralError, MistralProvider
 
-from .mistral import MistralProvider
-
-__all__ = ["MistralProvider"]
+__all__ = [
+    "CloudflareError",
+    "CloudflareProvider",
+    "FailoverExhausted",
+    "FailoverProvider",
+    "MistralError",
+    "MistralProvider",
+]

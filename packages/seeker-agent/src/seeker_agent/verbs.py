@@ -192,18 +192,95 @@ def classify_post(post: PostRecord, provider: ClassifierProvider) -> Classificat
 # --------------------------------------------------------------------------- #
 
 
-def read_vacancy_card(url: str, timeout_seconds: float = 10.0) -> dict[str, Any] | None:
+# Defensive cap: vacancy cards in v0.1 are small JSON documents. The valid
+# fixtures in this repo are <2KB; even a generous one carrying provenance
+# metadata and a verbose nice_to_haves list would not exceed ~16KB. A 256KB
+# ceiling is two orders of magnitude above realistic, far below anything
+# that could DoS the agent process, and is enforced before JSON parsing.
+_CARD_BYTES_CAP = 256 * 1024
+
+
+def read_vacancy_card(
+    url: str,
+    timeout_seconds: float = 10.0,
+    *,
+    client: "httpx.Client | None" = None,
+) -> dict[str, Any] | None:
     """Fetch a vacancy card by URL, parse JSON, return the dict.
 
-    The URL allowlist gate runs BEFORE this verb (orchestrator responsibility).
-    Schema validation runs AFTER, via :func:`gate.check_card_schema_valid`.
+    The URL allowlist gate (:func:`gate.check_card_url`) runs BEFORE this verb
+    — the orchestrator is responsible for that. Schema validation runs AFTER,
+    via :func:`gate.check_card_schema_valid`. This verb does neither; it only
+    fetches and parses, returning the body as a dict or ``None`` on any failure
+    mode (network error, non-2xx, oversized response, malformed JSON, JSON
+    that is not an object).
 
-    Stubbed in S296; HTTP fetch lands in S297.
+    Args:
+        url: Card URL. Must already have passed the URL allowlist check.
+        timeout_seconds: Total request timeout (connect + read).
+        client: Optional pre-built ``httpx.Client`` — tests inject one with
+            ``pytest-httpx`` so the fetch is mockable.
+
+    Returns:
+        Parsed JSON dict, or ``None`` if anything went wrong. Failures are
+        logged at WARNING level and emitted via stderr; the orchestrator
+        wraps :func:`audit.emit` around the verb to record skip events.
     """
-    raise NotImplementedError(
-        "S297: card fetcher not yet implemented. "
-        "Design: §5 verb 4; httpx GET with timeout, return parsed JSON or None on failure."
-    )
+    import httpx  # local import — keeps the package importable without httpx during stub usage
+
+    owns_client = client is None
+    if owns_client:
+        client = httpx.Client(
+            timeout=timeout_seconds,
+            # No automatic redirects — card URLs are exact matches; a 30x
+            # would indicate either a misconfiguration or an attempt to
+            # exfiltrate the request to an off-allowlist host.
+            follow_redirects=False,
+        )
+    try:
+        try:
+            response = client.get(url)
+        except (httpx.HTTPError, httpx.InvalidURL) as exc:
+            log.warning("read_vacancy_card url=%s transport_error=%s", url, exc)
+            return None
+
+        if response.status_code != 200:
+            log.warning(
+                "read_vacancy_card url=%s status=%d (expected 200)",
+                url,
+                response.status_code,
+            )
+            return None
+
+        content = response.content
+        if len(content) > _CARD_BYTES_CAP:
+            log.warning(
+                "read_vacancy_card url=%s oversize bytes=%d cap=%d",
+                url,
+                len(content),
+                _CARD_BYTES_CAP,
+            )
+            return None
+
+        try:
+            parsed = response.json()
+        except ValueError as exc:
+            log.warning("read_vacancy_card url=%s json_parse_error=%s", url, exc)
+            return None
+
+        if not isinstance(parsed, dict):
+            log.warning(
+                "read_vacancy_card url=%s payload not a JSON object (got %s)",
+                url,
+                type(parsed).__name__,
+            )
+            return None
+
+        log.info("read_vacancy_card url=%s bytes=%d ok", url, len(content))
+        return parsed
+    finally:
+        if owns_client:
+            client.close()
 
 
 # --------------------------------------------------------------------------- #

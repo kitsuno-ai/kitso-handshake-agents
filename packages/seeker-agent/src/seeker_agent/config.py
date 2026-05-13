@@ -112,6 +112,8 @@ class Settings(BaseSettings):
     # --- LLM provider ----------------------------------------------------- #
 
     seeker_llm_provider: LLMProvider = Field(default="mistral")
+    seeker_llm_failover_enabled: bool = Field(default=False)
+    seeker_llm_failover_cooldown_seconds: float = Field(default=300.0)
     mistral_api_key: str | None = Field(default=None)
     mistral_api_base: str = Field(default="https://api.mistral.ai/v1")
     mistral_model: str = Field(default="mistral-small-latest")

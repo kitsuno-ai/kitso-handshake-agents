@@ -134,35 +134,82 @@ def _process_classified_post(
 # --------------------------------------------------------------------------- #
 
 
+def _build_mistral(settings: Settings) -> "ClassifierProvider":
+    from .providers.mistral import MistralProvider
+
+    if not settings.mistral_api_key:
+        raise RuntimeError("SEEKER_LLM_PROVIDER=mistral but MISTRAL_API_KEY is unset")
+    return MistralProvider(
+        api_key=settings.mistral_api_key,
+        model=settings.mistral_model,
+        api_base=settings.mistral_api_base,
+        prompt_version=settings.classifier_prompt_version,
+        temperature=settings.classifier_temperature,
+        timeout_seconds=settings.classifier_timeout_seconds,
+        max_post_chars=settings.classifier_max_post_chars,
+        min_gap_seconds=settings.mistral_min_gap_seconds,
+    )
+
+
+def _build_cloudflare(settings: Settings) -> "ClassifierProvider":
+    from .providers.cloudflare import CloudflareProvider
+
+    if not settings.cloudflare_api_token:
+        raise RuntimeError("Cloudflare provider requested but CLOUDFLARE_API_TOKEN is unset")
+    if not settings.cloudflare_account_id:
+        raise RuntimeError("Cloudflare provider requested but CLOUDFLARE_ACCOUNT_ID is unset")
+    return CloudflareProvider(
+        api_token=settings.cloudflare_api_token,
+        account_id=settings.cloudflare_account_id,
+        model=settings.cloudflare_model,
+        prompt_version=settings.classifier_prompt_version,
+        temperature=settings.classifier_temperature,
+        timeout_seconds=settings.classifier_timeout_seconds,
+        max_post_chars=settings.classifier_max_post_chars,
+        # CF Workers AI has different limits; reuse mistral pacing config for now.
+        min_gap_seconds=settings.mistral_min_gap_seconds,
+    )
+
+
 def _build_provider(settings: Settings, force_echo: bool = False) -> ClassifierProvider:
     if force_echo:
         return EchoProvider(prompt_version=settings.classifier_prompt_version)
 
+    # Build the primary first — fail fast if its creds are missing.
     if settings.seeker_llm_provider == "mistral":
-        from .providers.mistral import MistralProvider
+        primary = _build_mistral(settings)
+    elif settings.seeker_llm_provider == "cloudflare":
+        primary = _build_cloudflare(settings)
+    else:
+        raise RuntimeError(f"unknown provider: {settings.seeker_llm_provider}")
 
-        if not settings.mistral_api_key:
-            raise RuntimeError(
-                "SEEKER_LLM_PROVIDER=mistral but MISTRAL_API_KEY is unset"
-            )
-        return MistralProvider(
-            api_key=settings.mistral_api_key,
-            model=settings.mistral_model,
-            api_base=settings.mistral_api_base,
-            prompt_version=settings.classifier_prompt_version,
-            temperature=settings.classifier_temperature,
-            timeout_seconds=settings.classifier_timeout_seconds,
-            max_post_chars=settings.classifier_max_post_chars,
-            min_gap_seconds=settings.mistral_min_gap_seconds,
+    # Failover is opt-in. When enabled, build the other provider as fallback
+    # IF its creds are configured. If creds for the secondary are missing we
+    # log and fall through to single-provider mode rather than refuse to start.
+    if not settings.seeker_llm_failover_enabled:
+        return primary
+
+    from .providers.failover import FailoverProvider
+
+    fallback = None
+    try:
+        if settings.seeker_llm_provider == "mistral":
+            fallback = _build_cloudflare(settings)
+        else:
+            fallback = _build_mistral(settings)
+    except RuntimeError as exc:
+        log.warning(
+            "SEEKER_LLM_FAILOVER_ENABLED=true but fallback unconfigured (%s); "
+            "running single-provider %s",
+            exc,
+            primary.name,
         )
+        return primary
 
-    if settings.seeker_llm_provider == "cloudflare":
-        raise NotImplementedError(
-            "S297: Cloudflare Workers AI provider not yet wired. "
-            "For now use SEEKER_LLM_PROVIDER=mistral or pass --force-echo."
-        )
-
-    raise RuntimeError(f"unknown provider: {settings.seeker_llm_provider}")
+    return FailoverProvider(
+        providers=[primary, fallback],
+        cooldown_seconds=settings.seeker_llm_failover_cooldown_seconds,
+    )
 
 
 # --------------------------------------------------------------------------- #

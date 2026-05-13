@@ -568,15 +568,64 @@ def test_build_provider_mistral_returns_mistral_provider(monkeypatch):
     assert isinstance(p, MistralProvider)
 
 
-def test_build_provider_cloudflare_not_yet_wired(monkeypatch):
+def test_build_provider_cloudflare_wires_provider(monkeypatch):
+    """S301: SEEKER_LLM_PROVIDER=cloudflare now returns a real CloudflareProvider."""
     _clean_seeker_env(monkeypatch)
     monkeypatch.setenv("SEEKER_LLM_PROVIDER", "cloudflare")
     monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "t")
     monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "a")
     from seeker_agent.main import _build_provider
+    from seeker_agent.providers import CloudflareProvider
     s = Settings()
-    with pytest.raises(NotImplementedError, match="S297"):
+    p = _build_provider(s, force_echo=False)
+    assert isinstance(p, CloudflareProvider)
+
+
+def test_build_provider_cloudflare_requires_credentials(monkeypatch):
+    """S301: missing CF creds should raise a clear RuntimeError, not NotImplementedError."""
+    _clean_seeker_env(monkeypatch)
+    monkeypatch.setenv("SEEKER_LLM_PROVIDER", "cloudflare")
+    # Intentionally leave CLOUDFLARE_API_TOKEN unset
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "a")
+    from seeker_agent.main import _build_provider
+    s = Settings()
+    with pytest.raises(RuntimeError, match="CLOUDFLARE_API_TOKEN"):
         _build_provider(s, force_echo=False)
+
+
+def test_build_provider_failover_enabled_wraps_chain(monkeypatch):
+    """S301: with both creds + failover flag, factory returns a FailoverProvider."""
+    _clean_seeker_env(monkeypatch)
+    monkeypatch.setenv("SEEKER_LLM_PROVIDER", "mistral")
+    monkeypatch.setenv("MISTRAL_API_KEY", "m")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "t")
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "a")
+    monkeypatch.setenv("SEEKER_LLM_FAILOVER_ENABLED", "true")
+    from seeker_agent.main import _build_provider
+    from seeker_agent.providers import FailoverProvider, MistralProvider, CloudflareProvider
+    s = Settings()
+    p = _build_provider(s, force_echo=False)
+    assert isinstance(p, FailoverProvider)
+    assert isinstance(p._providers[0], MistralProvider)
+    assert isinstance(p._providers[1], CloudflareProvider)
+    assert p.name == "mistral+cloudflare"
+
+
+def test_build_provider_failover_enabled_without_fallback_creds_falls_back_to_single(monkeypatch, caplog):
+    """S301: failover requested but CF creds missing -> single-provider, with warning."""
+    import logging
+    _clean_seeker_env(monkeypatch)
+    monkeypatch.setenv("SEEKER_LLM_PROVIDER", "mistral")
+    monkeypatch.setenv("MISTRAL_API_KEY", "m")
+    monkeypatch.setenv("SEEKER_LLM_FAILOVER_ENABLED", "true")
+    # No CF creds
+    from seeker_agent.main import _build_provider
+    from seeker_agent.providers import MistralProvider
+    s = Settings()
+    with caplog.at_level(logging.WARNING):
+        p = _build_provider(s, force_echo=False)
+    assert isinstance(p, MistralProvider)
+    assert any("fallback unconfigured" in r.message for r in caplog.records)
 
 def test_mistral_provider_retries_on_429(httpx_mock):
     """First call: 429. Second call: 200. Provider should retry and succeed."""
