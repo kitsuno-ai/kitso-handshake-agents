@@ -45,7 +45,7 @@ def _load_prompt_template() -> str:
     """
     try:
         with resources.files("seeker_agent.prompts").joinpath(
-            "classifier-v0.2.md"
+            "classifier-v0.3.md"
         ).open("r") as f:
             return f.read()
     except (FileNotFoundError, ModuleNotFoundError):
@@ -121,7 +121,7 @@ class MistralProvider:
         api_key: str,
         model: str = "mistral-small-latest",
         api_base: str = "https://api.mistral.ai/v1",
-        prompt_version: str = "seeker-classifier-v0.2",
+        prompt_version: str = "seeker-classifier-v0.3",
         temperature: float = 0.1,
         timeout_seconds: float = 30.0,
         max_post_chars: int = 8000,

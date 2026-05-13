@@ -44,7 +44,7 @@ def _classification(**overrides) -> Classification:
         language_detected="en",
         reasoning="Concrete role and location named.",
         model="test/0.1",
-        prompt_version="seeker-classifier-v0.2",
+        prompt_version="seeker-classifier-v0.3",
         latency_ms=1234,
     )
     base.update(overrides)
@@ -135,7 +135,7 @@ def test_round_trip_classification(experiment_db_url):
             assert row[2] is True
             assert abs(row[3] - 0.85) < 1e-5
             assert row[4] == "test/0.1"
-            assert row[5] == "seeker-classifier-v0.2"
+            assert row[5] == "seeker-classifier-v0.3"
             assert row[6] == "Senior Engineer"
             assert row[7] == 1234
             assert "hiring" in row[8].lower()

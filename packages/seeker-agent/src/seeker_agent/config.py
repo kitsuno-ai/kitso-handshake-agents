@@ -125,7 +125,7 @@ class Settings(BaseSettings):
     seeker_relevance_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
     classifier_temperature: float = Field(default=0.1, ge=0.0, le=1.0)
     classifier_timeout_seconds: float = Field(default=30.0, gt=0.0)
-    classifier_prompt_version: str = Field(default="seeker-classifier-v0.2")
+    classifier_prompt_version: str = Field(default="seeker-classifier-v0.3")
     classifier_max_post_chars: int = Field(default=8000)
 
     # --- Moltbook arm ----------------------------------------------------- #

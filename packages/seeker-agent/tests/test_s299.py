@@ -107,7 +107,7 @@ def test_provider_captures_headers_after_200(httpx_mock):
                             '"has_vacancy_card_url": false, "vacancy_card_url": null, '
                             '"spam_signals": [], "language_detected": "en", '
                             '"reasoning": "ok", "model": "mistral-small-latest", '
-                            '"prompt_version": "seeker-classifier-v0.2"}'
+                            '"prompt_version": "seeker-classifier-v0.3"}'
                         )
                     }
                 }

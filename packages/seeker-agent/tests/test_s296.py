@@ -388,7 +388,7 @@ def test_mistral_provider_successful_classification(httpx_mock):
     assert isinstance(result, Classification)
     assert result.is_job_shaped is True
     assert result.relevance == 0.85
-    assert result.prompt_version == "seeker-classifier-v0.2"
+    assert result.prompt_version == "seeker-classifier-v0.3"
 
 
 def test_mistral_provider_strips_markdown_fences(httpx_mock):
