@@ -1,14 +1,4 @@
-"""Seeker Agent entry point.
-
-One Python process, one CLI invocation per cron tick. No in-process scheduler:
-cron calls us twice per arm (Moltbook + gonzo), 15 minutes apart, every 4h.
-Crash recovery is free — the OS just doesn't run a tick that fails to start,
-and watermarks only advance after a clean pass.
-
-S295 ships the dry-run orchestrator: the loop walks the verb list, the gate
-makes its decisions, audit events fire, but the venue clients and DB writes
-raise :class:`NotImplementedError`. S296 fills them in.
-"""
+"""Seeker Agent entry point."""
 
 from __future__ import annotations
 
@@ -17,6 +7,7 @@ import logging
 import os
 import sys
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -40,7 +31,6 @@ log = logging.getLogger("seeker_agent")
 
 @contextmanager
 def _arm_lock(arm: ArmName, lock_dir: Path) -> Iterator[Path]:
-    """File-based lock per arm. Fail fast on contention; cron retries are cheap."""
     lock_path = lock_dir / f"seeker_{arm}.lock"
     if lock_path.exists():
         raise RuntimeError(f"another {arm} tick is running (lock: {lock_path})")
@@ -55,7 +45,7 @@ def _arm_lock(arm: ArmName, lock_dir: Path) -> Iterator[Path]:
 
 
 # --------------------------------------------------------------------------- #
-# Per-post handler — runs gate decisions in order                             #
+# Per-post handler                                                            #
 # --------------------------------------------------------------------------- #
 
 
@@ -65,12 +55,6 @@ def _process_classified_post(
     settings: Settings,
     cards_seen: set[str],
 ) -> dict:
-    """Walk the gates for one classification. Returns an audit-event dict.
-
-    Returns the audit event the orchestrator should emit. Does not execute
-    verbs that aren't implemented yet (cards / handshake) — instead records
-    the would-act intent so dry-run output is useful.
-    """
     base_event = {
         "event": "post_classified",
         "venue": post.venue,
@@ -80,44 +64,38 @@ def _process_classified_post(
         "model": classification.model,
         "prompt_version": classification.prompt_version,
         "latency_ms": classification.latency_ms,
+        "extracted_role_title": classification.extracted_role_title,
+        "extracted_company": classification.extracted_company,
+        "spam_signals": classification.spam_signals,
     }
 
-    # Gate 1: relevance threshold
     decision = gate.check_relevance(classification, settings.seeker_relevance_threshold)
     if not decision.allowed:
         return {**base_event, "outcome": "dropped_at_gate", "gate": decision.gate, "reason": decision.reason}
 
-    # If we got here, the classification matters. From here on, only the
-    # handshake path is interesting; the gonzo arm short-circuits because
-    # there are no cards on those venues.
     if post.venue.startswith("gonzo_"):
         return {**base_event, "outcome": "measured_only", "note": "gonzo arm; no handshake"}
 
     if not classification.has_vacancy_card_url:
         return {**base_event, "outcome": "no_card_url", "note": "no handshake path"}
 
-    # Gate 2: URL allowlist
     decision = gate.check_card_url(
         classification.vacancy_card_url, settings.card_url_allowlist_regex
     )
     if not decision.allowed:
         return {**base_event, "outcome": "dropped_at_gate", "gate": decision.gate, "reason": decision.reason}
 
-    assert classification.vacancy_card_url is not None  # gate would have denied None
+    assert classification.vacancy_card_url is not None
 
-    # Gate 3: dedup
     decision = gate.check_card_not_seen(classification.vacancy_card_url, cards_seen)
     if not decision.allowed:
         return {**base_event, "outcome": "dropped_at_gate", "gate": decision.gate, "reason": decision.reason}
 
-    # In S295 we stop here — read_vacancy_card + check_card_schema_valid +
-    # initiate_handshake all raise NotImplementedError. Surface as a planned
-    # action in the audit so dry-run output is useful.
     return {
         **base_event,
         "outcome": "would_handshake",
         "card_url": classification.vacancy_card_url,
-        "note": "S296: card fetch + schema validate + handshake initiation",
+        "note": "S297: card fetch + schema validate + handshake initiation",
     }
 
 
@@ -126,20 +104,46 @@ def _process_classified_post(
 # --------------------------------------------------------------------------- #
 
 
-def _build_provider(settings: Settings, force_echo: bool) -> ClassifierProvider:
+def _build_provider(settings: Settings, force_echo: bool = False) -> ClassifierProvider:
     """Pick a classifier provider.
 
-    For S295 we always return :class:`EchoProvider`. S296 wires Mistral and
-    Cloudflare Workers AI; this factory is the choke point.
+    Selection:
+    - ``force_echo=True`` → EchoProvider (used by dry-run smoke tests)
+    - ``seeker_llm_provider == "mistral"`` → MistralProvider (S296)
+    - ``seeker_llm_provider == "cloudflare"`` → CloudflareProvider (S297 — not yet wired)
     """
-    if force_echo or True:  # S295: always echo
+    if force_echo:
         return EchoProvider(prompt_version=settings.classifier_prompt_version)
-    # S296: branch on settings.seeker_llm_provider
-    raise RuntimeError("unreachable in S295")
+
+    if settings.seeker_llm_provider == "mistral":
+        from .providers.mistral import MistralProvider
+
+        if not settings.mistral_api_key:
+            raise RuntimeError(
+                "SEEKER_LLM_PROVIDER=mistral but MISTRAL_API_KEY is unset"
+            )
+        return MistralProvider(
+            api_key=settings.mistral_api_key,
+            model=settings.mistral_model,
+            api_base=settings.mistral_api_base,
+            prompt_version=settings.classifier_prompt_version,
+            temperature=settings.classifier_temperature,
+            timeout_seconds=settings.classifier_timeout_seconds,
+            max_post_chars=settings.classifier_max_post_chars,
+            min_gap_seconds=settings.mistral_min_gap_seconds,
+        )
+
+    if settings.seeker_llm_provider == "cloudflare":
+        raise NotImplementedError(
+            "S297: Cloudflare Workers AI provider not yet wired. "
+            "For now use SEEKER_LLM_PROVIDER=mistral or pass --force-echo."
+        )
+
+    raise RuntimeError(f"unknown provider: {settings.seeker_llm_provider}")
 
 
 # --------------------------------------------------------------------------- #
-# Single-tick driver                                                          #
+# Tick driver                                                                 #
 # --------------------------------------------------------------------------- #
 
 
@@ -152,10 +156,10 @@ def run_tick(
 ) -> int:
     """Run one tick against an explicit batch of posts.
 
-    `posts` is provided so this function is testable without venue clients.
-    The real cron-driven path fetches posts via verbs.fetch_next_*(); S296.
+    ``posts`` is provided externally so this function is testable without
+    venue clients. The CLI builds the batch (from --posts-file, --fetch-gonzo,
+    or — in S297 — --fetch-moltbook) before calling this.
     """
-    # Kill switch
     decision = gate.check_kill_switch(settings.seeker_kill_file.exists())
     if not decision.allowed:
         audit.emit(
@@ -165,7 +169,6 @@ def run_tick(
         return 6
 
     if not dry_run:
-        # Live mode requires credentials per arm. Fail closed.
         missing = settings.check_live_mode(arm)
         if missing:
             audit.emit(
@@ -178,8 +181,6 @@ def run_tick(
     provider = _build_provider(settings, force_echo=force_echo)
     log.info("provider=%s arm=%s posts=%d dry_run=%s", provider.name, arm, len(posts), dry_run)
 
-    # cards_seen would be loaded from experiment_db in live mode; for dry-run
-    # we start empty.
     cards_seen: set[str] = set()
     n_classified = 0
     n_dropped = 0
@@ -187,8 +188,23 @@ def run_tick(
     try:
         with _arm_lock(arm, settings.tick_lock_dir):
             for post in posts:
-                classification = verbs.classify_post(post, provider)
-                # Validate the classifier output schema (defense in depth).
+                try:
+                    classification = verbs.classify_post(post, provider)
+                except Exception as exc:
+                    audit.emit(
+                        {
+                            "event": "classifier_call_failed",
+                            "venue": post.venue,
+                            "post_id": post.post_id,
+                            "error": f"{type(exc).__name__}: {exc}",
+                        },
+                        settings.experiment_db_url,
+                    )
+                    log.warning(
+                        "classifier failed on %s/%s: %s", post.venue, post.post_id, exc
+                    )
+                    continue
+
                 try:
                     validate_payload(classification.to_dict())
                 except Exception as exc:
@@ -209,8 +225,6 @@ def run_tick(
                 if event.get("outcome") == "dropped_at_gate":
                     n_dropped += 1
                 elif event.get("outcome") == "would_handshake":
-                    # In live mode we'd add to cards_seen after a successful
-                    # handshake. Dry-run records the would-be add for transparency.
                     cards_seen.add(event["card_url"])
     except RuntimeError as exc:
         audit.emit({"event": "tick_lock_contention", "arm": arm, "error": str(exc)}, settings.experiment_db_url)
@@ -235,27 +249,36 @@ def run_tick(
 # --------------------------------------------------------------------------- #
 
 
+def _parse_since(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise SystemExit(f"--since must be ISO-8601 (got {raw!r}): {exc}")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def cli() -> int:
     parser = argparse.ArgumentParser(
         prog="seeker-agent",
         description="Read-side reference agent for the Kitso Handshake protocol.",
     )
-    parser.add_argument(
-        "--arm",
-        choices=("moltbook", "gonzo"),
-        required=True,
-        help="Which arm to run this tick.",
-    )
-    parser.add_argument("--dry-run", action="store_true", help="Use EchoProvider, no DB writes.")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Debug logging.")
-    parser.add_argument(
-        "--posts-file",
-        type=Path,
-        help=(
-            "JSON file containing a list of PostRecord-shaped dicts. Required in "
-            "S295 because venue fetchers are not yet implemented."
-        ),
-    )
+    parser.add_argument("--arm", choices=("moltbook", "gonzo"), required=True)
+    parser.add_argument("--dry-run", action="store_true", help="Skip live-mode checks; still calls the configured provider unless --force-echo.")
+    parser.add_argument("--force-echo", action="store_true", help="Use EchoProvider regardless of SEEKER_LLM_PROVIDER (for testing the pipe).")
+    parser.add_argument("--verbose", "-v", action="store_true")
+
+    # Source: choose ONE
+    src = parser.add_mutually_exclusive_group()
+    src.add_argument("--posts-file", type=Path, help="JSON file with list of PostRecord-shaped dicts.")
+    src.add_argument("--fetch-gonzo", metavar="CHANNEL", help="Live-fetch a batch from sf4l_prod for the given gonzo channel.")
+
+    parser.add_argument("--batch-size", type=int, default=20, help="Max posts per tick (default 20).")
+    parser.add_argument("--since", help="Watermark: ISO-8601 datetime. Only posts after this are fetched.")
+
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -263,25 +286,59 @@ def cli() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    settings = Settings()
+    try:
+        settings = Settings.load()
+    except PermissionError as exc:
+        log.error("seeker credentials file unusable: %s", exc)
+        audit.emit({"event": "credentials_file_refused", "error": str(exc)}, None)
+        return 5
 
-    if args.posts_file is None:
-        log.error(
-            "S295 requires --posts-file. Venue fetchers (verbs 1 and 2) land in S296. "
-            "Provide a JSON file with a list of post records to drive the orchestrator."
-        )
+    # Source the batch
+    if args.fetch_gonzo:
+        if args.arm != "gonzo":
+            log.error("--fetch-gonzo only makes sense with --arm gonzo")
+            return 2
+        if not settings.sf4l_prod_readonly_url:
+            log.error(
+                "no sf4l_prod_readonly_url in env or credentials file. "
+                "Run with SF4L_PROD_READONLY_URL set or populate ~/.config/seeker/credentials.json"
+            )
+            return 4
+        since = _parse_since(args.since)
+        try:
+            posts = verbs.fetch_next_gonzo_batch(
+                channel=args.fetch_gonzo,
+                since=since,
+                limit=args.batch_size,
+                sf4l_prod_readonly_url=settings.sf4l_prod_readonly_url,
+            )
+        except Exception as exc:
+            log.error("fetch_next_gonzo_batch failed: %s", exc)
+            audit.emit(
+                {"event": "fetch_failed", "channel": args.fetch_gonzo, "error": f"{type(exc).__name__}: {exc}"},
+                settings.experiment_db_url,
+            )
+            return 9
+        log.info("fetched %d posts from %s", len(posts), args.fetch_gonzo)
+    elif args.posts_file:
+        import json
+        try:
+            raw = json.loads(args.posts_file.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            log.error("could not load posts file: %s", exc)
+            return 9
+        posts = [PostRecord(**r) for r in raw]
+    else:
+        log.error("provide one of --posts-file or --fetch-gonzo")
         return 8
 
-    import json
-
-    try:
-        raw = json.loads(args.posts_file.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        log.error("could not load posts file: %s", exc)
-        return 9
-
-    posts = [PostRecord(**r) for r in raw]
-    return run_tick(arm=args.arm, settings=settings, posts=posts, dry_run=args.dry_run)
+    return run_tick(
+        arm=args.arm,
+        settings=settings,
+        posts=posts,
+        dry_run=args.dry_run,
+        force_echo=args.force_echo,
+    )
 
 
 if __name__ == "__main__":

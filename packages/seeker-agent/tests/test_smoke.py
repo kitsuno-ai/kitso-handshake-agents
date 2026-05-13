@@ -531,7 +531,7 @@ def test_run_tick_dry_run_moltbook(monkeypatch, tmp_path, capsys):
         ),
         _post("Just chatting about coffee", post_id="p3"),
     ]
-    rc = run_tick("moltbook", settings, posts, dry_run=True)
+    rc = run_tick("moltbook", settings, posts, dry_run=True, force_echo=True)
     assert rc == 0
 
     err = capsys.readouterr().err
@@ -559,7 +559,7 @@ def test_run_tick_dry_run_gonzo_no_handshake_attempt(monkeypatch, tmp_path, caps
             submolt="gonzo_hn_whoshiring",
         ),
     ]
-    rc = run_tick("gonzo", settings, posts, dry_run=True)
+    rc = run_tick("gonzo", settings, posts, dry_run=True, force_echo=True)
     assert rc == 0
     err = capsys.readouterr().err
     assert "measured_only" in err
@@ -574,7 +574,7 @@ def test_run_tick_kill_switch_aborts(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("SEEKER_KILL_FILE", str(kill))
     settings = Settings()
 
-    rc = run_tick("moltbook", settings, [_post("hiring")], dry_run=True)
+    rc = run_tick("moltbook", settings, [_post("hiring")], dry_run=True, force_echo=True)
     assert rc == 6
     err = capsys.readouterr().err
     assert "tick_aborted" in err
@@ -603,7 +603,7 @@ def test_run_tick_lock_contention(monkeypatch, tmp_path, capsys):
     # Pre-create a stale lock
     (tmp_path / "seeker_moltbook.lock").write_text("99999")
 
-    rc = run_tick("moltbook", settings, [_post("hiring")], dry_run=True)
+    rc = run_tick("moltbook", settings, [_post("hiring")], dry_run=True, force_echo=True)
     assert rc == 7
     err = capsys.readouterr().err
     assert "tick_lock_contention" in err

@@ -4,11 +4,10 @@ This module is the **only** outward-facing capability surface the orchestrator
 exposes. The LLM never executes these; it only proposes intent in its JSON
 output. The orchestrator calls these after the gate decides.
 
-For S295, real implementations of verbs that need venue clients or the
-experiment DB (`fetch_next_*`, `read_vacancy_card`, `log_classification`,
-`initiate_handshake`, `post_field_note`) are stubbed with
-:class:`NotImplementedError`. `classify_post` is real — it delegates to the
-injected :class:`~seeker_agent.classifier.ClassifierProvider`.
+S296 status:
+- ``fetch_next_gonzo_batch`` — REAL (sf4l_prod RO read)
+- ``classify_post`` — REAL (delegates to provider)
+- everything else — stubbed with explicit NotImplementedError + S297+ pointer
 """
 
 from __future__ import annotations
@@ -16,7 +15,8 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Iterable
 
 from .classifier import Classification, ClassifierProvider, PostRecord
 
@@ -43,33 +43,126 @@ def fetch_next_moltbook_page(
 ) -> list[PostRecord]:
     """Poll the next batch of posts from a submolt. Read-only.
 
-    Raises NotImplementedError in S295; venue read-client lands in S296 once
+    Raises NotImplementedError in S296; venue read-client lands in S297 once
     Moltbook's read API surface is documented.
     """
     raise NotImplementedError(
-        "S296: Moltbook read client not yet implemented. "
+        "S297: Moltbook read client not yet implemented. "
         "Design: §5 verb 1; submolt allowlist enforced by gate.check_submolt."
     )
 
 
 # --------------------------------------------------------------------------- #
-# 2. fetch_next_gonzo_batch                                                   #
+# 2. fetch_next_gonzo_batch — REAL                                            #
 # --------------------------------------------------------------------------- #
+
+
+# Allowlist of channels the verb is willing to query. Mirrors the design's
+# gonzo channel set; rejecting unknown channels here protects against an LLM
+# proposing an arbitrary string that happens to look like a source name.
+GONZO_CHANNELS_ALLOWED = frozenset(
+    {
+        "gonzo_hn_whoshiring",
+        "gonzo_bluesky",
+        "gonzo_telegram",
+        "gonzo_reddit",
+        "gonzo_lobsters_whoshiring",
+        "gonzo_mastodon",
+    }
+)
+
+
+_GONZO_SQL = """
+SELECT
+    id::text          AS post_id,
+    source            AS venue,
+    title             AS post_title,
+    description       AS post_text,
+    description_language AS language_hint,
+    gonzo_first_seen  AS observed_at
+FROM market_data
+WHERE source = %(channel)s
+  AND ( %(since)s::timestamptz IS NULL OR gonzo_first_seen > %(since)s::timestamptz )
+ORDER BY gonzo_first_seen ASC
+LIMIT %(limit)s
+""".strip()
+
+
+def _row_to_post_record(row: dict[str, Any]) -> PostRecord:
+    """Pure mapper. Easy to unit-test without a DB."""
+    observed = row["observed_at"]
+    if isinstance(observed, datetime):
+        observed_iso = observed.astimezone(timezone.utc).isoformat()
+    else:
+        observed_iso = str(observed) if observed is not None else ""
+    return PostRecord(
+        venue=row["venue"],
+        post_id=row["post_id"],
+        post_text=row["post_text"] or "",
+        post_title=row.get("post_title"),
+        observed_at=observed_iso,
+        submolt_or_channel=row["venue"],  # for gonzo, channel == venue
+        language_hint=row.get("language_hint") or None,
+    )
+
+
+def _fetch_gonzo_rows(
+    conn,
+    channel: str,
+    since: datetime | None,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Run the parameterized SELECT and return list-of-dicts.
+
+    ``conn`` is anything with a ``cursor()`` that returns a context-manager
+    cursor supporting ``execute()`` + ``description`` + ``fetchall()``. In
+    production this is a psycopg2 connection; tests inject a fake.
+    """
+    from psycopg2.extras import RealDictCursor  # local import — keeps test mocking easy
+
+    if channel not in GONZO_CHANNELS_ALLOWED:
+        raise ValueError(
+            f"channel {channel!r} not in GONZO_CHANNELS_ALLOWED; refusing to query"
+        )
+
+    params = {"channel": channel, "since": since, "limit": int(limit)}
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(_GONZO_SQL, params)
+        rows = cur.fetchall()
+    return [dict(r) for r in rows]
 
 
 def fetch_next_gonzo_batch(
     channel: str,
-    since_id: int | None,
+    since: datetime | None,
+    limit: int,
     sf4l_prod_readonly_url: str,
 ) -> list[PostRecord]:
-    """Read newer-than-watermark rows from sf4l_prod.market_data WHERE source=$channel.
+    """Read newer-than-watermark rows from market_data WHERE source = :channel.
 
-    Read-only credential; no writes. S296 implementation uses psycopg2.
+    Read-only credential; no writes. The query is parameterized; ``channel``
+    is also allowlisted defensively before reaching SQL.
+
+    The caller is responsible for advancing the watermark on success — that
+    keeps watermarks transactional with the rest of the tick.
     """
-    raise NotImplementedError(
-        "S296: gonzo arm reader not yet implemented. "
-        "Design: §5 verb 2; query market_data WHERE source LIKE 'gonzo_%' AND id > $since_id."
+    import psycopg2  # local import so the package imports cheaply
+
+    if channel not in GONZO_CHANNELS_ALLOWED:
+        raise ValueError(
+            f"channel {channel!r} not in GONZO_CHANNELS_ALLOWED; refusing to query"
+        )
+
+    conn = psycopg2.connect(sf4l_prod_readonly_url)
+    try:
+        rows = _fetch_gonzo_rows(conn, channel, since, limit)
+    finally:
+        conn.close()
+
+    log.info(
+        "fetch_next_gonzo_batch channel=%s since=%s rows=%d", channel, since, len(rows)
     )
+    return [_row_to_post_record(r) for r in rows]
 
 
 # --------------------------------------------------------------------------- #
@@ -81,13 +174,11 @@ def classify_post(post: PostRecord, provider: ClassifierProvider) -> Classificat
     """Run the classifier against a single post.
 
     Latency is measured here and stamped onto the Classification — the
-    provider itself does not need to know about timing. Cost-per-call is
-    estimated upstream once we have token counts (S296).
+    provider itself does not need to know about timing.
     """
     start = time.monotonic()
     result = provider.classify(post)
     elapsed_ms = int((time.monotonic() - start) * 1000)
-    # Classification is a regular dataclass (not frozen) so we can stamp latency.
     result.latency_ms = elapsed_ms
     return result
 
@@ -103,10 +194,10 @@ def read_vacancy_card(url: str, timeout_seconds: float = 10.0) -> dict[str, Any]
     The URL allowlist gate runs BEFORE this verb (orchestrator responsibility).
     Schema validation runs AFTER, via :func:`gate.check_card_schema_valid`.
 
-    Stubbed in S295; HTTP fetch lands in S296.
+    Stubbed in S296; HTTP fetch lands in S297.
     """
     raise NotImplementedError(
-        "S296: card fetcher not yet implemented. "
+        "S297: card fetcher not yet implemented. "
         "Design: §5 verb 4; httpx GET with timeout, return parsed JSON or None on failure."
     )
 
@@ -123,10 +214,10 @@ def log_classification(
 ) -> int:
     """Append-only INSERT into experiment_db.classifications. Returns row PK.
 
-    Stubbed in S295; persistence lands in S296.
+    Stubbed in S296; persistence lands in S297.
     """
     raise NotImplementedError(
-        "S296: experiment_db writer not yet implemented. "
+        "S297: experiment_db writer not yet implemented. "
         "Design: §9.1; INSERT ... ON CONFLICT (venue, post_id) DO NOTHING."
     )
 
@@ -137,13 +228,12 @@ def log_classification(
 
 
 def initiate_handshake(card: dict[str, Any]) -> HandshakeResult:
-    """Initiate a handshake against a schema-valid card. Stubbed in S295.
+    """Initiate a handshake against a schema-valid card. Stubbed in S296.
 
-    The transport for this is still TBD — see Kitso Handshake spec for the
-    response_pathways field. Likely an email + structured response form. S296.
+    Transport TBD per Kitso Handshake spec v0.2 response_pathways field.
     """
     raise NotImplementedError(
-        "S296: handshake transport TBD (spec v0.2 response_pathways). "
+        "S297: handshake transport TBD (spec v0.2 response_pathways). "
         "Design: §5 verb 6; gates: URL allowlist + schema valid + dedup all run first."
     )
 
@@ -154,13 +244,8 @@ def initiate_handshake(card: dict[str, Any]) -> HandshakeResult:
 
 
 def post_field_note(text: str, target_submolt: str, api_key: str, api_base: str) -> HandshakeResult:
-    """Post a field note (verb 7). Disabled in v1 per design §14.4.
-
-    The gate already rejects the call when ``FIELD_NOTE_ENABLED=false``; this
-    function exists to make the capability surface visible in code review even
-    though it is unreachable in v1.
-    """
+    """Post a field note (verb 7). Disabled in v1 per design §14.4."""
     raise NotImplementedError(
-        "S296+: field note verb. v1 default is FIELD_NOTE_ENABLED=false; "
+        "S297+: field note verb. v1 default is FIELD_NOTE_ENABLED=false; "
         "gates: feature flag + length + rate limit + second-LLM PII check."
     )

@@ -8,11 +8,18 @@ provider's credentials and the kill token.
 Per the design doc §14 (resolved S295), the agent uses **free tier only**:
 Mistral primary, Cloudflare Workers AI as failover. ``SEEKER_LLM_PROVIDER``
 is the switch.
+
+Credentials that don't fit in env vars (the PG URL with embedded password)
+live in a JSON file at ``$HOME/.config/seeker/credentials.json`` (mode 0600).
+See :func:`_load_seeker_credentials_file` and :meth:`Settings.load`.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import stat
 from pathlib import Path
 from typing import Literal
 
@@ -23,6 +30,72 @@ log = logging.getLogger(__name__)
 
 LLMProvider = Literal["mistral", "cloudflare"]
 ArmName = Literal["moltbook", "gonzo"]
+ConnectMode = Literal["host", "internal"]
+
+
+# --------------------------------------------------------------------------- #
+# Credentials file loader (parallel to vacancy-agent's pattern)              #
+# --------------------------------------------------------------------------- #
+
+
+def _load_seeker_credentials_file(
+    creds_path: Path | None = None,
+    prefer: ConnectMode = "host",
+) -> dict | None:
+    """Load the seeker's credentials JSON.
+
+    Default path: ``$HOME/.config/seeker/credentials.json``. Expected shape::
+
+        {
+          "sf4l_prod_readonly_url_internal": "postgresql://seeker_ro:...@sf4l-postgres-prod:5432/sf4l_prod",
+          "sf4l_prod_readonly_url_host":     "postgresql://seeker_ro:...@127.0.0.1:5434/sf4l_prod",
+          "role": "seeker_ro"
+        }
+
+    Returns a dict with ``sf4l_prod_readonly_url`` resolved against ``prefer``
+    (host vs internal), or ``None`` if the file is absent. Raises
+    ``PermissionError`` if the file is world- or group-readable.
+    """
+    if creds_path is None:
+        home = Path(os.environ.get("HOME") or Path.home())
+        creds_path = home / ".config" / "seeker" / "credentials.json"
+    creds_path = Path(creds_path)
+
+    if not creds_path.exists():
+        return None
+
+    st = creds_path.stat()
+    if st.st_mode & 0o077:
+        raise PermissionError(
+            f"{creds_path} has mode {oct(stat.S_IMODE(st.st_mode))}; "
+            f"must be 0600 or stricter. Run: chmod 600 {creds_path}"
+        )
+
+    with creds_path.open() as f:
+        data = json.load(f)
+
+    if not isinstance(data, dict):
+        log.warning("seeker credentials file %s is not a JSON object; ignoring", creds_path)
+        return None
+
+    out: dict = {}
+    pg_key = f"sf4l_prod_readonly_url_{prefer}"
+    if pg_key in data and isinstance(data[pg_key], str):
+        out["sf4l_prod_readonly_url"] = data[pg_key]
+    else:
+        # The URL is the only field this loader exists to surface;
+        # without it, the file is useless to the caller.
+        return None
+    # Pass through any other known fields
+    for k in ("role",):
+        if k in data:
+            out[k] = data[k]
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Settings                                                                    #
+# --------------------------------------------------------------------------- #
 
 
 class Settings(BaseSettings):
@@ -41,9 +114,14 @@ class Settings(BaseSettings):
         description="Which LLM provider the classifier calls. Both must be free tier.",
     )
     mistral_api_key: str | None = Field(default=None)
+    mistral_api_base: str = Field(default="https://api.mistral.ai/v1")
     mistral_model: str = Field(
-        default="open-mistral-nemo",  # free-tier-capable, JSON-mode-capable
-        description="Mistral model id. Override if Mistral changes free-tier offerings.",
+        default="mistral-small-latest",
+        description="Mistral model id. Matches kitso_router canonical free-tier model.",
+    )
+    mistral_min_gap_seconds: float = Field(
+        default=1.0,
+        description="Free-tier rate limit: 1 req/s. Provider enforces; we pre-wait.",
     )
     cloudflare_api_token: str | None = Field(default=None)
     cloudflare_account_id: str | None = Field(default=None)
@@ -62,7 +140,7 @@ class Settings(BaseSettings):
     )
     classifier_temperature: float = Field(default=0.1, ge=0.0, le=1.0)
     classifier_timeout_seconds: float = Field(default=30.0, gt=0.0)
-    classifier_prompt_version: str = Field(default="seeker-classifier-v0.1")
+    classifier_prompt_version: str = Field(default="seeker-classifier-v0.2")
     classifier_max_post_chars: int = Field(
         default=8000,
         description="Truncate longer posts before sending to LLM. Audit excerpt is 500 chars.",
@@ -73,40 +151,30 @@ class Settings(BaseSettings):
     moltbook_arm_enabled: bool = Field(default=True)
     moltbook_api_base: str = Field(default="https://www.moltbook.com/api/v1/")
     moltbook_api_key: str | None = Field(default=None)
-    moltbook_allowed_submolts: str = Field(
-        default="",
-        description=(
-            "Comma-separated submolt names the seeker is permitted to poll. "
-            "Empty = arm refuses to fetch. Greg locks the list near kickoff."
-        ),
-    )
+    moltbook_allowed_submolts: str = Field(default="")
 
     # --- Gonzo arm -------------------------------------------------------- #
 
     gonzo_arm_enabled: bool = Field(default=True)
     sf4l_prod_readonly_url: str | None = Field(
         default=None,
-        description=(
-            "Postgres URL for read-only access to sf4l_prod (gonzo_* market_data only). "
-            "Required for the gonzo arm in live mode."
-        ),
+        description="Postgres URL for read-only access to sf4l_prod. Settings.load() can fill from credentials file.",
+    )
+    seeker_connect_mode: ConnectMode = Field(
+        default="host",
+        description="Which sf4l_prod URL to use from the credentials file (host vs internal docker network).",
     )
     gonzo_channels: str = Field(
         default=(
             "gonzo_hn_whoshiring,gonzo_bluesky,gonzo_telegram,"
             "gonzo_reddit,gonzo_lobsters_whoshiring,gonzo_mastodon"
         ),
-        description="Comma-separated source values matched in market_data.source.",
     )
 
     # --- Card allowlist + handshake -------------------------------------- #
 
     card_url_allowlist_regex: str = Field(
         default=r"^https://kitsuno\.ai/handshake/v0\.1/vacancies/[a-z0-9-]+\.json$",
-        description=(
-            "Card URLs proposed by the classifier must match this exact pattern "
-            "or the gate drops them. v1 = our own cards only."
-        ),
     )
     card_fetch_timeout_seconds: float = Field(default=10.0, gt=0.0)
 
@@ -115,14 +183,11 @@ class Settings(BaseSettings):
     field_note_enabled: bool = Field(default=False)
     field_note_min_interval_hours: int = Field(default=24, ge=1)
     field_note_max_chars: int = Field(default=280)
-    field_note_target_submolt: str = Field(default="")  # set if field notes are turned on
+    field_note_target_submolt: str = Field(default="")
 
     # --- Persistence ----------------------------------------------------- #
 
-    experiment_db_url: str | None = Field(
-        default=None,
-        description="Postgres URL for the isolated experiment DB. If unset, audit -> stdout.",
-    )
+    experiment_db_url: str | None = Field(default=None)
 
     # --- Kill switch ----------------------------------------------------- #
 
@@ -133,18 +198,25 @@ class Settings(BaseSettings):
 
     tick_lock_dir: Path = Field(default=Path("/tmp"))
 
+    # --- Credentials file path ------------------------------------------- #
+
+    credentials_file: Path | None = Field(
+        default=None,
+        description=(
+            "Override path for seeker credentials JSON. "
+            "Default is $HOME/.config/seeker/credentials.json."
+        ),
+    )
+
     # ===================================================================== #
 
     def submolt_list(self) -> list[str]:
-        """Parse MOLTBOOK_ALLOWED_SUBMOLTS into a clean list."""
         return [s.strip() for s in self.moltbook_allowed_submolts.split(",") if s.strip()]
 
     def gonzo_channel_list(self) -> list[str]:
-        """Parse GONZO_CHANNELS into a clean list."""
         return [s.strip() for s in self.gonzo_channels.split(",") if s.strip()]
 
     def llm_credentials_ok(self) -> tuple[bool, list[str]]:
-        """Whether the configured provider has credentials. Returns (ok, missing)."""
         if self.seeker_llm_provider == "mistral":
             return (
                 self.mistral_api_key is not None,
@@ -160,20 +232,12 @@ class Settings(BaseSettings):
         return (False, [f"unknown_provider:{self.seeker_llm_provider}"])
 
     def check_live_mode(self, arm: ArmName) -> list[str]:
-        """Return missing env vars that would prevent live operation of `arm`.
-
-        Empty list means live mode is OK for that arm.
-        """
         missing: list[str] = []
-
-        # Shared: LLM credentials + kill token
         ok, llm_missing = self.llm_credentials_ok()
         if not ok:
             missing.extend(llm_missing)
         if not self.seeker_kill_token:
             missing.append("SEEKER_KILL_TOKEN")
-
-        # Per-arm
         if arm == "moltbook":
             if not self.moltbook_api_key:
                 missing.append("MOLTBOOK_API_KEY")
@@ -182,10 +246,33 @@ class Settings(BaseSettings):
         elif arm == "gonzo":
             if not self.sf4l_prod_readonly_url:
                 missing.append("SF4L_PROD_READONLY_URL")
-
-        # Persistence is required in live mode (no point running a measurement
-        # arm with stdout-only audit)
         if not self.experiment_db_url:
             missing.append("EXPERIMENT_DB_URL")
-
         return missing
+
+    @classmethod
+    def load(cls) -> "Settings":
+        """Construct Settings, enriching from the seeker credentials file when env is silent.
+
+        Env vars always win. The credentials file is consulted only when
+        ``SF4L_PROD_READONLY_URL`` is not in the environment. Future fields
+        (Mistral key from file etc.) plug in here.
+
+        Raises ``PermissionError`` if the credentials file exists but has
+        unsafe permissions; the agent must refuse to run in that case.
+        """
+        s = cls()
+        if s.sf4l_prod_readonly_url is None:
+            creds = _load_seeker_credentials_file(
+                creds_path=s.credentials_file,
+                prefer=s.seeker_connect_mode,
+            )
+            if creds and creds.get("sf4l_prod_readonly_url"):
+                s = s.model_copy(
+                    update={"sf4l_prod_readonly_url": creds["sf4l_prod_readonly_url"]}
+                )
+                log.info(
+                    "sf4l_prod_readonly_url loaded from credentials file (mode=%s)",
+                    s.seeker_connect_mode,
+                )
+        return s

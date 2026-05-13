@@ -1,6 +1,6 @@
 [project]
 name = "seeker-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "Read-side reference agent for the Kitso Handshake protocol: classify posts, gate, optionally initiate handshakes."
 authors = [
     {name = "Kitsuno", email = "hello@kitsuno.ai"},
@@ -13,6 +13,7 @@ dependencies = [
     "jsonschema>=4.21.0",
     "pydantic>=2.6.0",
     "pydantic-settings>=2.2.0",
+    "psycopg2-binary>=2.9.9",
 ]
 
 [project.optional-dependencies]
@@ -41,7 +42,7 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "B", "UP", "S"]
-ignore = ["S101"]  # allow asserts in tests
+ignore = ["S101"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
