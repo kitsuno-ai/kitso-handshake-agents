@@ -7,6 +7,7 @@ output. The orchestrator calls these after the gate decides.
 S296 status:
 - ``fetch_next_gonzo_batch`` — REAL (sf4l_prod RO read)
 - ``classify_post`` — REAL (delegates to provider)
+- ``log_classification`` — REAL (delegates to ExperimentDB)
 - everything else — stubbed with explicit NotImplementedError + S297+ pointer
 """
 
@@ -16,9 +17,12 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, TYPE_CHECKING
 
 from .classifier import Classification, ClassifierProvider, PostRecord
+
+if TYPE_CHECKING:
+    from .experiment_db import ExperimentDB
 
 log = logging.getLogger(__name__)
 
@@ -203,23 +207,21 @@ def read_vacancy_card(url: str, timeout_seconds: float = 10.0) -> dict[str, Any]
 
 
 # --------------------------------------------------------------------------- #
-# 5. log_classification                                                       #
+# 5. log_classification — REAL                                                #
 # --------------------------------------------------------------------------- #
 
 
 def log_classification(
     classification: Classification,
     post: PostRecord,
-    experiment_db_url: str,
-) -> int:
-    """Append-only INSERT into experiment_db.classifications. Returns row PK.
+    experiment_db: "ExperimentDB",
+) -> int | None:
+    """Append-only INSERT into experiment_db.classifications. Returns row id.
 
-    Stubbed in S296; persistence lands in S297.
+    Idempotent via ``UNIQUE (venue, post_id)``. When persistence is disabled
+    (``experiment_db_url`` unset), returns ``None`` and is a no-op.
     """
-    raise NotImplementedError(
-        "S297: experiment_db writer not yet implemented. "
-        "Design: §9.1; INSERT ... ON CONFLICT (venue, post_id) DO NOTHING."
-    )
+    return experiment_db.log_classification(classification, post)
 
 
 # --------------------------------------------------------------------------- #

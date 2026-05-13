@@ -9,7 +9,7 @@ Per the design doc §14 (resolved S295), the agent uses **free tier only**:
 Mistral primary, Cloudflare Workers AI as failover. ``SEEKER_LLM_PROVIDER``
 is the switch.
 
-Credentials that don't fit in env vars (the PG URL with embedded password)
+Credentials that don't fit in env vars (PG URLs with embedded passwords)
 live in a JSON file at ``$HOME/.config/seeker/credentials.json`` (mode 0600).
 See :func:`_load_seeker_credentials_file` and :meth:`Settings.load`.
 """
@@ -49,12 +49,20 @@ def _load_seeker_credentials_file(
         {
           "sf4l_prod_readonly_url_internal": "postgresql://seeker_ro:...@sf4l-postgres-prod:5432/sf4l_prod",
           "sf4l_prod_readonly_url_host":     "postgresql://seeker_ro:...@127.0.0.1:5434/sf4l_prod",
-          "role": "seeker_ro"
+          "experiment_db_url_internal":      "postgresql://seeker_writer:...@experiment-db-postgres:5432/kitso_handshake_experiment",
+          "experiment_db_url_host":          "postgresql://seeker_writer:...@127.0.0.1:5435/kitso_handshake_experiment",
+          "role": "seeker_ro",
+          "experiment_role": "seeker_writer"
         }
 
-    Returns a dict with ``sf4l_prod_readonly_url`` resolved against ``prefer``
-    (host vs internal), or ``None`` if the file is absent. Raises
-    ``PermissionError`` if the file is world- or group-readable.
+    Returns a dict with resolved URLs (host vs internal per ``prefer``),
+    or ``None`` if the file is absent. Raises ``PermissionError`` if the
+    file is world- or group-readable.
+
+    Either URL may be absent from the file — callers should check for
+    ``sf4l_prod_readonly_url`` and ``experiment_db_url`` independently.
+    Returns ``None`` only when BOTH URL keys are absent (the file is then
+    useless to this loader).
     """
     if creds_path is None:
         home = Path(os.environ.get("HOME") or Path.home())
@@ -79,15 +87,20 @@ def _load_seeker_credentials_file(
         return None
 
     out: dict = {}
-    pg_key = f"sf4l_prod_readonly_url_{prefer}"
-    if pg_key in data and isinstance(data[pg_key], str):
-        out["sf4l_prod_readonly_url"] = data[pg_key]
-    else:
-        # The URL is the only field this loader exists to surface;
-        # without it, the file is useless to the caller.
+    sf4l_key = f"sf4l_prod_readonly_url_{prefer}"
+    if sf4l_key in data and isinstance(data[sf4l_key], str):
+        out["sf4l_prod_readonly_url"] = data[sf4l_key]
+
+    exp_key = f"experiment_db_url_{prefer}"
+    if exp_key in data and isinstance(data[exp_key], str):
+        out["experiment_db_url"] = data[exp_key]
+
+    if not out:
+        # Neither URL present — the file has no value to us
         return None
+
     # Pass through any other known fields
-    for k in ("role",):
+    for k in ("role", "experiment_role"):
         if k in data:
             out[k] = data[k]
     return out
@@ -187,7 +200,10 @@ class Settings(BaseSettings):
 
     # --- Persistence ----------------------------------------------------- #
 
-    experiment_db_url: str | None = Field(default=None)
+    experiment_db_url: str | None = Field(
+        default=None,
+        description="Postgres URL for the isolated experiment DB. Settings.load() can fill from credentials file.",
+    )
 
     # --- Kill switch ----------------------------------------------------- #
 
@@ -254,25 +270,37 @@ class Settings(BaseSettings):
     def load(cls) -> "Settings":
         """Construct Settings, enriching from the seeker credentials file when env is silent.
 
-        Env vars always win. The credentials file is consulted only when
-        ``SF4L_PROD_READONLY_URL`` is not in the environment. Future fields
-        (Mistral key from file etc.) plug in here.
+        Env vars always win. The credentials file is consulted only for keys
+        not already in the environment (``SF4L_PROD_READONLY_URL`` and
+        ``EXPERIMENT_DB_URL``).
 
         Raises ``PermissionError`` if the credentials file exists but has
         unsafe permissions; the agent must refuse to run in that case.
         """
         s = cls()
-        if s.sf4l_prod_readonly_url is None:
-            creds = _load_seeker_credentials_file(
-                creds_path=s.credentials_file,
-                prefer=s.seeker_connect_mode,
+        needs_sf4l = s.sf4l_prod_readonly_url is None
+        needs_exp = s.experiment_db_url is None
+        if not (needs_sf4l or needs_exp):
+            return s
+
+        creds = _load_seeker_credentials_file(
+            creds_path=s.credentials_file,
+            prefer=s.seeker_connect_mode,
+        )
+        if not creds:
+            return s
+
+        updates: dict = {}
+        if needs_sf4l and creds.get("sf4l_prod_readonly_url"):
+            updates["sf4l_prod_readonly_url"] = creds["sf4l_prod_readonly_url"]
+        if needs_exp and creds.get("experiment_db_url"):
+            updates["experiment_db_url"] = creds["experiment_db_url"]
+
+        if updates:
+            log.info(
+                "credentials file populated: %s (mode=%s)",
+                ", ".join(sorted(updates.keys())),
+                s.seeker_connect_mode,
             )
-            if creds and creds.get("sf4l_prod_readonly_url"):
-                s = s.model_copy(
-                    update={"sf4l_prod_readonly_url": creds["sf4l_prod_readonly_url"]}
-                )
-                log.info(
-                    "sf4l_prod_readonly_url loaded from credentials file (mode=%s)",
-                    s.seeker_connect_mode,
-                )
+            return s.model_copy(update=updates)
         return s
