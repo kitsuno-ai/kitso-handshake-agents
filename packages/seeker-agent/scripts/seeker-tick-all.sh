@@ -71,7 +71,6 @@ cd "$PKG_DIR" || { log "cannot cd to $PKG_DIR"; exit 1; }
 
 timeout "$SWEEP_TIMEOUT_S" python3 -m seeker_agent.main sweep \
     --batch-size "$BATCH_SIZE" \
-    --dry-run \
     2>&1 | sed -u "s/^/    /"
 RC=${PIPESTATUS[0]}
 
