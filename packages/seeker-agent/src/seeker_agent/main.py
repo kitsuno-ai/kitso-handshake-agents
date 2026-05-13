@@ -166,8 +166,7 @@ def _build_cloudflare(settings: Settings) -> "ClassifierProvider":
         temperature=settings.classifier_temperature,
         timeout_seconds=settings.classifier_timeout_seconds,
         max_post_chars=settings.classifier_max_post_chars,
-        # CF Workers AI has different limits; reuse mistral pacing config for now.
-        min_gap_seconds=settings.mistral_min_gap_seconds,
+        min_gap_seconds=settings.cloudflare_min_gap_seconds,
     )
 
 
@@ -666,7 +665,71 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         if rc != 0:
             overall_rc = rc
 
-    log.info("sweep end rc=%d", overall_rc)
+
+    # --- moltbook arm ----------------------------------------------------- #
+    # Runs after the gonzo loop using the same provider (shared pacing).
+    # No-op when disabled, when no submolts are configured, or when the
+    # api_key is missing — never aborts the whole sweep on Moltbook trouble.
+    if settings.moltbook_arm_enabled and not args.only:
+        moltbook_submolts = settings.submolt_list()
+        if not settings.moltbook_api_key:
+            log.info("moltbook arm: no MOLTBOOK_API_KEY — skipping")
+        elif not moltbook_submolts:
+            log.info("moltbook arm: no submolts configured (MOLTBOOK_ALLOWED_SUBMOLTS empty) — skipping")
+        else:
+            log.info("moltbook arm: sweeping %d submolt(s)", len(moltbook_submolts))
+            for submolt in moltbook_submolts:
+                log.info("==> sweep moltbook submolt=%s", submolt)
+                # Each submolt gets its own watermark, keyed by submolt slug
+                # under the moltbook arm. Channel for classifications is the
+                # single gonzo_moltbook string (matches the value the verb
+                # stamps onto PostRecord).
+                since = None
+                if args.resume:
+                    since = _resume_since_from_watermark(settings, "moltbook", submolt)
+                    if since:
+                        log.info("    --resume: watermark resolved to %s", since.isoformat())
+
+                try:
+                    posts, _next_cursor = verbs.fetch_next_moltbook_page(
+                        submolt=submolt,
+                        since=since,
+                        limit=args.batch_size,
+                        moltbook_api_key=settings.moltbook_api_key,
+                        api_base=settings.moltbook_api_base,
+                    )
+                except Exception as exc:
+                    log.error("    moltbook fetch failed: %s", exc)
+                    audit.emit(
+                        {"event": "fetch_failed", "arm": "moltbook", "submolt": submolt,
+                         "error": f"{type(exc).__name__}: {exc}"},
+                        settings.experiment_db_url,
+                    )
+                    overall_rc = 9
+                    continue
+
+                log.info("    fetched %d posts", len(posts))
+                if not posts:
+                    audit.emit(
+                        {"event": "tick_complete", "arm": "moltbook", "submolt": submolt,
+                         "n_classified": 0, "n_dropped": 0, "dry_run": args.dry_run,
+                         "watermark_advanced_to": None},
+                        db,
+                    )
+                    continue
+
+                rc = _run_tick_with_provider(
+                    arm="moltbook",
+                    settings=settings,
+                    posts=posts,
+                    provider=provider,
+                    dry_run=args.dry_run,
+                    channel=verbs.MOLTBOOK_CHANNEL,
+                )
+                if rc != 0:
+                    overall_rc = rc
+
+        log.info("sweep end rc=%d", overall_rc)
     return overall_rc
 
 

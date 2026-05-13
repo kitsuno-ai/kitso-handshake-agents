@@ -121,6 +121,7 @@ class Settings(BaseSettings):
     cloudflare_api_token: str | None = Field(default=None)
     cloudflare_account_id: str | None = Field(default=None)
     cloudflare_model: str = Field(default="@cf/qwen/qwen1.5-14b-chat-awq")
+    cloudflare_min_gap_seconds: float = Field(default=1.0)
 
     # --- Classifier behavior --------------------------------------------- #
 

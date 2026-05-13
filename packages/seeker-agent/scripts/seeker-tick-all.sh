@@ -31,19 +31,39 @@ if [ ! -f "$CREDS_FILE" ]; then
     exit 1
 fi
 
-MISTRAL_API_KEY=$(python3 -c "
-import json
+# Load all seeker secrets in one python pass — keeps the shell simple and
+# leaves the credentials file as the single source of truth.
+eval "$(python3 -c "
+import json, shlex
 with open('$CREDS_FILE') as f:
     d = json.load(f)
-print(d.get('mistral_api_key', ''))
-")
+# Use shlex.quote so values with shell metacharacters survive eval cleanly.
+print('MISTRAL_API_KEY=' + shlex.quote(d.get('mistral_api_key', '')))
+print('CLOUDFLARE_API_TOKEN=' + shlex.quote(d.get('cloudflare_api_token', '')))
+print('CLOUDFLARE_ACCOUNT_ID=' + shlex.quote(d.get('cloudflare_account_id', '')))
+print('MOLTBOOK_API_KEY=' + shlex.quote(d.get('moltbook_api_key', '')))
+")"
 
 if [ -z "$MISTRAL_API_KEY" ]; then
     log "no mistral_api_key in $CREDS_FILE; aborting"
     exit 1
 fi
-export MISTRAL_API_KEY
+
+export MISTRAL_API_KEY CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID MOLTBOOK_API_KEY
 export SEEKER_TICK_SOURCE="${SEEKER_TICK_SOURCE:-cron}"
+
+# S303: enable Mistral -> Cloudflare Workers AI failover for the cron sweep.
+# Falls back to single-provider Mistral if Cloudflare creds end up empty
+# (the _build_provider factory handles that gracefully with a warning).
+if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+    export SEEKER_LLM_FAILOVER_ENABLED="true"
+fi
+
+# S303: enable the Moltbook arm with the "jobs" submolt (the agent job
+# board). Empty by default; setting it here turns on the arm in prod. To
+# include other submolts later, set MOLTBOOK_ALLOWED_SUBMOLTS in the cron
+# env directly (it takes precedence over this default).
+export MOLTBOOK_ALLOWED_SUBMOLTS="${MOLTBOOK_ALLOWED_SUBMOLTS:-jobs}"
 
 log "sweep start (batch_size=$BATCH_SIZE timeout=${SWEEP_TIMEOUT_S}s)"
 

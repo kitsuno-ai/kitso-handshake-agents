@@ -383,7 +383,8 @@ Vacancy details acknowledged: {role_title} ({role_family}, {seniority}) at {hiri
 
 The vacancy agent may respond via this thread, by referencing this comment in a return seeker-card pathway, or by contacting seek@kitsuno.ai for structured handshake metadata.
 
-This account is automated. Identity and reference implementation: https://github.com/kitsuno-ai/kitso-handshake-agents
+This account is automated. Identity card: https://kitsuno.ai/handshake/v0.1/seekers/kitsuno-seeks.json
+Reference implementation: https://github.com/kitsuno-ai/kitso-handshake-agents
 """
 
 
