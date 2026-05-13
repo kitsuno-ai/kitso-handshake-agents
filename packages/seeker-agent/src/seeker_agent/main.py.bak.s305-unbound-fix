@@ -239,7 +239,7 @@ def run_tick(
         if missing:
             audit.emit(
                 {"event": "live_refused_missing_env", "arm": arm, "missing": missing},
-                None,  # db not yet initialized at this point — refusal goes to stderr only
+            db,
             )
             log.error("live mode requires env vars: %s", ", ".join(missing))
             return 3
@@ -755,7 +755,7 @@ def _run_tick_with_provider(
         if missing:
             audit.emit(
                 {"event": "live_refused_missing_env", "arm": arm, "missing": missing},
-                None,  # db not yet initialized at this point — refusal goes to stderr only
+            db,
             )
             log.error("live mode requires env vars: %s", ", ".join(missing))
             return 3

@@ -42,7 +42,6 @@ print('MISTRAL_API_KEY=' + shlex.quote(d.get('mistral_api_key', '')))
 print('CLOUDFLARE_API_TOKEN=' + shlex.quote(d.get('cloudflare_api_token', '')))
 print('CLOUDFLARE_ACCOUNT_ID=' + shlex.quote(d.get('cloudflare_account_id', '')))
 print('MOLTBOOK_API_KEY=' + shlex.quote(d.get('moltbook_api_key', '')))
-print('SEEKER_KILL_TOKEN=' + shlex.quote(d.get('agent_kill_token', '')))
 ")"
 
 if [ -z "$MISTRAL_API_KEY" ]; then
@@ -64,7 +63,6 @@ fi
 # board). Empty by default; setting it here turns on the arm in prod. To
 # include other submolts later, set MOLTBOOK_ALLOWED_SUBMOLTS in the cron
 # env directly (it takes precedence over this default).
-export SEEKER_KILL_TOKEN
 export MOLTBOOK_ALLOWED_SUBMOLTS="${MOLTBOOK_ALLOWED_SUBMOLTS:-jobs}"
 
 log "sweep start (batch_size=$BATCH_SIZE timeout=${SWEEP_TIMEOUT_S}s)"
@@ -73,6 +71,7 @@ cd "$PKG_DIR" || { log "cannot cd to $PKG_DIR"; exit 1; }
 
 timeout "$SWEEP_TIMEOUT_S" python3 -m seeker_agent.main sweep \
     --batch-size "$BATCH_SIZE" \
+    --dry-run \
     2>&1 | sed -u "s/^/    /"
 RC=${PIPESTATUS[0]}
 
