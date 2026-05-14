@@ -153,7 +153,7 @@ class Settings(BaseSettings):
     # --- Card allowlist + handshake -------------------------------------- #
 
     card_url_allowlist_regex: str = Field(
-        default=r"^https://kitsuno\.ai/handshake/v0\.1/vacancies/[a-z0-9-]+\.json$",
+        default=r"^https://(?:kitsuno\.ai/handshake/v0\.1/vacancies/|app\.kitsuno\.ai/handshake/v0\.2/cards/)[a-z0-9-]+\.json$",
     )
     card_fetch_timeout_seconds: float = Field(default=10.0, gt=0.0)
 

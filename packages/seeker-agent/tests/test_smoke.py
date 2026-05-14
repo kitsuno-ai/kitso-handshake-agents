@@ -349,12 +349,21 @@ def test_gate_relevance_below_threshold():
 # --------------------------------------------------------------------------- #
 
 
-_ALLOWLIST_RE = r"^https://kitsuno\.ai/handshake/v0\.1/vacancies/[a-z0-9-]+\.json$"
+_ALLOWLIST_RE = r"^https://(?:kitsuno\.ai/handshake/v0\.1/vacancies/|app\.kitsuno\.ai/handshake/v0\.2/cards/)[a-z0-9-]+\.json$"
 
 
 def test_gate_card_url_accepts_valid():
     d = gate.check_card_url(
         "https://kitsuno.ai/handshake/v0.1/vacancies/role-x.json", _ALLOWLIST_RE
+    )
+    assert d.allowed
+
+
+def test_gate_card_url_accepts_v0_2_card():
+    """S316 ea1300dc: v0.2 cards on app.kitsuno.ai/handshake/v0.2/cards/ must allow."""
+    d = gate.check_card_url(
+        "https://app.kitsuno.ai/handshake/v0.2/cards/toast-principal-technical-writer-e3a324a4.json",
+        _ALLOWLIST_RE,
     )
     assert d.allowed
 
@@ -382,6 +391,16 @@ def test_gate_card_url_accepts_valid():
         "https://kitsuno.ai/handshake/v0.1/vacancies/role.json?evil=1",
         # No .json
         "https://kitsuno.ai/handshake/v0.1/vacancies/role",
+        # v0.2 on wrong host (v0.2 lives on app.kitsuno.ai, not kitsuno.ai)
+        "https://kitsuno.ai/handshake/v0.2/cards/role-x.json",
+        # v0.2 on wrong path (cards/, not vacancies/)
+        "https://app.kitsuno.ai/handshake/v0.2/vacancies/role-x.json",
+        # v0.1 on wrong host (v0.1 lives on kitsuno.ai, not app.kitsuno.ai)
+        "https://app.kitsuno.ai/handshake/v0.1/vacancies/role-x.json",
+        # Crossed: v0.1 path on v0.2 surface
+        "https://kitsuno.ai/handshake/v0.1/cards/role-x.json",
+        # v0.2 uppercase in slug
+        "https://app.kitsuno.ai/handshake/v0.2/cards/Role-X.json",
     ],
 )
 def test_gate_card_url_rejects_bad(url):

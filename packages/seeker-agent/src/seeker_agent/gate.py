@@ -110,7 +110,12 @@ def check_relevance(classification: Classification, threshold: float) -> GateDec
 def check_card_url(url: str | None, allowlist_pattern: str) -> GateDecision:
     """Card URLs must match the allowlist regex exactly.
 
-    v1 = our own cards only (`^https://kitsuno\\.ai/handshake/v0\\.1/vacancies/[a-z0-9-]+\\.json$`).
+    Accepted shapes:
+      v0.1 vacancies: `https://kitsuno.ai/handshake/v0.1/vacancies/<slug>.json`
+      v0.2 cards    : `https://app.kitsuno.ai/handshake/v0.2/cards/<slug>.json`
+
+    Slug character class is `[a-z0-9-]+` for both. Default pattern lives in
+    config.SeekerSettings.card_url_allowlist_regex.
     """
     if not url:
         return GateDecision.deny("card_url_allowlist", "no card URL")
