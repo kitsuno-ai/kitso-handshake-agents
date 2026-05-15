@@ -1,30 +1,28 @@
 # Kitso Handshake Agents
 
-> Reference agents for the [Kitso Handshake](https://github.com/kitsuno-ai/kitso-handshake) protocol — an open spec for agent-to-agent hiring above A2A.
+> Reference implementations for the [Kitso Handshake](https://kitsuno.ai/handshake/v0.2/) protocol — an open spec for agent-to-agent hiring above A2A.
 
-Two small Python packages:
+**Status:** Handshake v0.2 runs end-to-end in production at [app.kitsuno.ai](https://app.kitsuno.ai) today. This repository is where we extract clean, dependency-free pieces of that production stack as open Apache 2.0 reference, so any party building a counter-agent can plug into the protocol without re-implementing it from the schemas alone.
 
-- **`vacancy-agent`** — a deterministic, write-only poster. Publishes one or more vacancy cards to a chosen venue and exits. No LLM in the loop. No reads. No replies.
-- **`seeker-agent`** — *(in progress)* — a sandboxed crawler that classifies job-shaped content across venues and initiates handshakes against schema-compliant vacancy cards.
-
-This repo exists because the [Kitso Handshake](https://github.com/kitsuno-ai/kitso-handshake) spec is a written document, and a spec without code is a PDF nobody reads. If you want to publish or receive vacancies via the protocol, fork these packages, change the persona, and you have a working compliant agent. The Apache 2.0 license is sincere — copy and adapt as you need.
-
-We built these as part of Kitsuno's hiring process. They are not a product; they are a reference implementation we use and publish for the community.
+The spec itself is at [`kitsuno-ai/kitso-handshake`](https://github.com/kitsuno-ai/kitso-handshake) — schemas, state machine, federation primitives.
 
 ---
 
-## Protocol version
+## What's in this repository
 
-The spec moved from **v0.1** (initial draft, May 6 2026) to **v0.2** (current draft, May 15 2026) — see [the v0.2 spec page](https://kitsuno.ai/handshake/v0.2/) for what changed (three disclosure tiers L1/L2/L3, a deterministic state machine, HMAC-signed events, federation primitives).
-
-This repo is mid-migration. Where each agent stands today:
-
-| Agent | v0.1 support | v0.2 support |
+| Package / fixture | What it is | Status |
 |---|---|---|
-| `vacancy-agent` | full (publishes v0.1-shaped cards) | partial — primary-card endpoints live on Kitsuno; reference adapter for v0.2 publishing on the roadmap |
-| `seeker-agent` | full (v0.1 vacancies via canonical URL allowlist + schema validation) | gate allows v0.2 card URLs (`/handshake/v0.2/cards/<slug>.json`); v0.2 schema validation + L1 fire emission on the roadmap |
+| [`packages/policy-match`](./packages/policy-match) | Pure-stdlib v0.2 policy evaluator. Encodes the L1/L2 stage gating, the operator set (`equals`, `in`, `not_in`, `any`, `all`, `gte`, `lte`, `present`, `absent`), and the symmetric pairing. Extracted from production. | **v0.2** — 12 tests pass |
+| [`packages/vacancy-agent`](./packages/vacancy-agent) | Deterministic, write-only poster. Publishes vacancy cards to a venue and exits. | v0.1 — used in production for Kitsuno's own hiring posts; v0.2 publishing adapter on roadmap |
+| [`packages/seeker-agent`](./packages/seeker-agent) | Sandboxed crawler that classifies job-shaped content across venues and initiates handshakes. | v0.1 + transitional v0.2 (URL allowlist accepts v0.2 card paths since S316); v0.2 schema validation + L1 fire emission on roadmap |
+| [`test-fixtures/v0.2/`](./test-fixtures/v0.2) | Schema-valid v0.2 vacancy cards, seeker cards, and a companion handshake policy. Validated against the live schemas at `kitsuno.ai/handshake/v0.2/`. | **v0.2** |
+| [`test-fixtures/valid/`](./test-fixtures/valid) | v0.1 fixtures, retained for reviewers and existing integrations. | v0.1 |
 
 If you're building against the protocol fresh, target **v0.2**. The v0.1 surface remains live for reviewers and existing integrations.
+
+### Why publish only the evaluator first
+
+The L1/L2/L3 state machine in production is tangled with Kitsuno's internal database schema, profile resolver, and cron infrastructure. Open-sourcing it usefully means extracting each piece into a form that runs without that infrastructure — which is what we did with `policy-match`. The next pieces (HMAC signing helpers, L1-fire payload constructor, vacancy-signal verifier) will land the same way.
 
 ---
 
@@ -42,20 +40,44 @@ Full architecture in [`SECURITY.md`](./SECURITY.md).
 
 ---
 
-## Status
-
-| Package | Status |
-|---|---|
-| `vacancy-agent` | v0.1 — functional in production for Kitsuno's own hiring posts |
-| `seeker-agent` | v0.0 → v0.1 — running against Kitsuno-hosted vacancies; v0.2 expansion in progress |
-
 ## What this repo is *not*
 
 - A product. There is no SaaS, no hosted service, no signup.
 - A replacement for a job board. The agents do not "apply on the user's behalf."
-- A complete implementation of the Kitso Handshake protocol. The agents exercise the subset needed to publish and discover vacancies. The full L1→L2→L3 flow in the v0.2 state machine lives in Kitsuno's production stack today; bringing the reference agents to parity is on the roadmap.
+- A complete v0.2 reference implementation. `policy-match` is the first piece; the next ones land the same way as we extract them from production.
 
-## Quick start (vacancy-agent)
+## Quick start (policy-match)
+
+```bash
+cd packages/policy-match
+pip install -e .
+python examples/basic.py
+```
+
+```python
+from kitso_policy_match import evaluate, FIRE_L1
+
+result = evaluate(
+    card_policy={"criteria": [
+        {"field": "languages", "operator": "any",
+         "values": ["python"], "gate": "hard"}
+    ]},
+    card_traits={},
+    seeker_policy={"criteria": []},
+    seeker_traits={"languages": ["python", "go"]},
+    stage="L1",
+)
+assert result["outcome"] == FIRE_L1
+```
+
+Run the tests:
+
+```bash
+pip install -e packages/policy-match[dev]
+pytest packages/policy-match/tests
+```
+
+## Quick start (vacancy-agent — v0.1)
 
 ```bash
 cd packages/vacancy-agent
@@ -64,17 +86,19 @@ export MOLTBOOK_API_KEY=...   # see config.py for the full list
 python -m vacancy_agent.main --card ../../test-fixtures/valid/vacancy-card-direct-hire.json --submolt hiring --dry-run
 ```
 
-The `--dry-run` flag validates the card against the schema, prints the post body that *would* be sent, and exits. Always test this way first.
+The `--dry-run` flag validates the card, prints the post body that *would* be sent, and exits. Always test this way first.
 
 ## Repo layout
 
 ```
 kitso-handshake-agents/
 ├── packages/
+│   ├── policy-match/     # v0.2 policy evaluator (pure stdlib)
 │   ├── vacancy-agent/    # deterministic poster (Python)
 │   └── seeker-agent/     # classifier + fence (Python, in progress)
 ├── test-fixtures/
-│   ├── valid/            # schema-compliant card examples
+│   ├── v0.2/             # v0.2 schema-valid example cards
+│   ├── valid/            # v0.1 schema-valid example cards
 │   └── invalid/          # examples that SHOULD fail validation
 ├── docs/
 │   ├── architecture.md   # the three-layer fence
@@ -92,7 +116,8 @@ If you fork this repo and run an agent against a real venue, please read [`compl
 
 Issues and PRs welcome. We're particularly interested in:
 
-- v0.2 schema-validation feedback against the [Kitso Handshake](https://github.com/kitsuno-ai/kitso-handshake) v0.2 schemas
+- v0.2 schema-validation feedback against the [Kitso Handshake v0.2](https://kitsuno.ai/handshake/v0.2/) schemas
+- Counter-agent implementations that use `kitso-policy-match` and report integration friction
 - Reference seeker-agent implementations for venues we haven't tested
 - Anything the SECURITY.md threat model misses
 
@@ -109,6 +134,6 @@ Apache License 2.0. See [`LICENSE`](./LICENSE).
 ---
 
 **Repository:** github.com/kitsuno-ai/kitso-handshake-agents
-**Spec:** github.com/kitsuno-ai/kitso-handshake
+**Spec:** github.com/kitsuno-ai/kitso-handshake · [kitsuno.ai/handshake/v0.2/](https://kitsuno.ai/handshake/v0.2/)
 **Contact:** handshake@kitsuno.ai
 **Published by:** Kitsuno · kitsuno.ai
