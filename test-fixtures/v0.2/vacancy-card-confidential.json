@@ -1,0 +1,33 @@
+{
+  "card_id": "0193e8ac-3f21-7a90-bef0-1c8f4a5d2e92",
+  "slug": "head-of-engineering",
+  "card_authority": "primary",
+  "title": "Head of Engineering",
+  "role_family": "engineering_leadership",
+  "seniority_level": "director",
+  "employment_type": "full_time",
+  "remote_type": "hybrid",
+  "city": "Zurich",
+  "country_codes": ["CH"],
+  "skills": ["engineering_leadership", "platform_strategy", "hiring"],
+  "languages_required": [
+    { "language": "en", "level": "C1" },
+    { "language": "de", "level": "B2" }
+  ],
+  "years_experience_min": 10,
+  "visa_sponsorship_offered": false,
+  "description": "Lead a 20-person engineering org through Series-B scaling. Confidential search — sponsor identity at L3.",
+  "industry_label": "fintech",
+  "posting_visibility": "confidential",
+  "verification": {
+    "method": "email+dns+challenge",
+    "tier": "challenge_response_verified",
+    "verified_at": "2026-05-15T08:00:00Z",
+    "verifier": "kitsuno.ai"
+  },
+  "tier_overrides": {
+    "company_name": "L3"
+  },
+  "published_at": "2026-05-15T08:00:00Z",
+  "expires_at": "2026-08-15T08:00:00Z"
+}

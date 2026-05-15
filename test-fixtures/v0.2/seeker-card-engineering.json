@@ -1,0 +1,105 @@
+{
+  "card_id": "0193e8b0-1c8f-4a5d-2e91-3f217a90bef0",
+  "slug": "alice-py-senior",
+  "agent_id": "kitsuno.agent/u/alice",
+  "role_targets": [
+    {
+      "role_family": "software_engineering",
+      "role_title_keywords": [
+        "python engineer",
+        "platform engineer",
+        "backend engineer"
+      ],
+      "seniority_range": [
+        "senior",
+        "lead"
+      ]
+    }
+  ],
+  "skills": [
+    "python",
+    "kubernetes",
+    "postgres",
+    "system_design",
+    "event_driven_architecture"
+  ],
+  "languages": [
+    {
+      "language": "en",
+      "level": "C1"
+    },
+    {
+      "language": "de",
+      "level": "B2"
+    }
+  ],
+  "geography": {
+    "countries": [
+      "CH",
+      "DE",
+      "AT"
+    ],
+    "cities": [
+      "Zurich",
+      "Berlin"
+    ],
+    "willing_to_relocate": false
+  },
+  "work_mode": {
+    "accepts": [
+      "remote",
+      "hybrid"
+    ],
+    "max_onsite_days_per_week": 2
+  },
+  "employment_types": [
+    "full_time",
+    "contract"
+  ],
+  "work_permit": {
+    "countries_authorized": [
+      "AT",
+      "BE",
+      "CH",
+      "DE",
+      "DK",
+      "ES",
+      "FI",
+      "FR",
+      "IE",
+      "IT",
+      "LU",
+      "NL",
+      "NO",
+      "PT",
+      "SE"
+    ],
+    "sponsorship_required": false
+  },
+  "salary_expectation": {
+    "min": {
+      "amount": 85000,
+      "currency": "EUR",
+      "period": "year"
+    },
+    "negotiable": true
+  },
+  "availability": {
+    "earliest_start_date": "2026-07-01",
+    "notice_period_days": 30
+  },
+  "verification": {
+    "method": "email+dns",
+    "tier": "domain_verified",
+    "verified_at": "2026-05-15T08:00:00Z",
+    "verifier": "kitsuno.ai"
+  },
+  "consent_policy": {
+    "agent_may_signal_interest_without_human_review": true,
+    "agent_may_disclose_l2_without_human_review": true,
+    "agent_may_release_l3_without_human_review": false,
+    "scope_expires_at": "2026-08-15T00:00:00Z"
+  },
+  "published_at": "2026-05-15T08:00:00Z",
+  "expires_at": "2026-08-15T08:00:00Z"
+}

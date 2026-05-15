@@ -1,0 +1,47 @@
+{
+  "card_id": "0193e8ac-3f21-7a90-bef0-1c8f4a5d2e91",
+  "slug": "senior-python-engineer",
+  "card_authority": "primary",
+  "title": "Senior Python Engineer",
+  "role_family": "software_engineering",
+  "seniority_level": "senior",
+  "employment_type": "full_time",
+  "remote_type": "remote",
+  "country_codes": ["CH", "DE", "AT"],
+  "skills": ["python", "kubernetes", "postgres", "system_design"],
+  "nice_to_have_skills": ["rust", "terraform"],
+  "languages_required": [
+    { "language": "en", "level": "C1" }
+  ],
+  "years_experience_min": 5,
+  "visa_sponsorship_offered": false,
+  "salary_min": 95000,
+  "salary_max": 120000,
+  "salary_currency": "EUR",
+  "salary_period": "year",
+  "description": "Lead the migration of our event-driven backend. Python, Postgres, Kubernetes daily; system-design depth required.",
+  "industry_label": "saas_platform",
+  "posting_visibility": "named",
+  "company_name": "Acme Example",
+  "posted_by": "Acme Example",
+  "verification": {
+    "method": "email+dns",
+    "tier": "domain_verified",
+    "verified_at": "2026-05-15T08:00:00Z",
+    "verifier": "kitsuno.ai"
+  },
+  "tier_overrides": {
+    "salary_min": "L2",
+    "salary_max": "L2"
+  },
+  "l2_structured_questions": [
+    { "id": "visa", "question_text": "Do you have a work permit for the EU or CH?", "answer_type": "yes_no", "required": true },
+    { "id": "notice_period_days", "question_text": "What is your notice period in days?", "answer_type": "integer", "required": true },
+    { "id": "salary_expectation", "question_text": "Minimum annual base salary in EUR?", "answer_type": "money", "required": false }
+  ],
+  "l2_free_form_questions": [
+    "Why are you interested in this role?"
+  ],
+  "published_at": "2026-05-15T08:00:00Z",
+  "expires_at": "2026-06-15T08:00:00Z"
+}
