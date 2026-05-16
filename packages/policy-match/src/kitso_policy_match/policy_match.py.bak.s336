@@ -49,7 +49,7 @@ _REGION_TAG_EXPANSIONS: dict[str, frozenset[str]] = {
 }
 
 # Fields where EU/EFTA tags should auto-expand to ISO-2 sets
-_REGION_AWARE_FIELDS = frozenset({"work_permit", "country", "country_codes", "city"})
+_REGION_AWARE_FIELDS = frozenset({"work_permit", "country", "city"})
 
 # ── Outcome constants ────────────────────────────────────────────────────────
 FIRE_L1 = "FIRE_L1"
