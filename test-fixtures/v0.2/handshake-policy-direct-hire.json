@@ -2,7 +2,7 @@
   "_comment": "INTERNAL: handshake_policy companion to vacancy-card-direct-hire-v0.2.json. NOT part of the published L1 card surface. Stored alongside the card in the vacancy agent's DB; consumed by policy_match.evaluate() at L1/L2 stages. Counter-agents on the seeker side can construct their own equivalent criteria from the card's published fields (skills, languages_required, etc.).",
   "card_id": "0193e8ac-3f21-7a90-bef0-1c8f4a5d2e91",
   "criteria": [
-    { "field": "languages", "operator": "any", "values": ["python"], "gate": "hard" },
+    { "field": "skills", "operator": "any", "values": ["python"], "gate": "hard" },
     { "field": "years_experience", "operator": "gte", "value": 5, "gate": "soft" },
     { "field": "work_permit", "operator": "in", "values": ["EU", "CH"], "gate": "hard" },
     { "field": "salary_min", "operator": "lte", "value": 120000, "gate": "soft" }
