@@ -86,46 +86,10 @@ def _expand_region_tags(values: Iterable[Any]) -> set[str]:
     return out
 
 
-# Legacy trait name aliases (S337 — 30d deprecation window)
-_TRAIT_LEGACY_ALIASES = {
-    "work_permit": "work_permit.countries_authorized",
-    "salary_min": "salary_expectation.min.amount",
-}
-
-
 def _get_trait(traits: Any, field: str) -> Any:
-    """Read a trait from a dict or attribute-bearing object. 
-    
-    Supports dotted-path resolution (e.g. "work_permit.countries_authorized").
-    Legacy flat names are mapped to canonical paths during deprecation window.
-    Returns None if absent.
-    """
+    """Read a trait from a dict or attribute-bearing object. Returns None if absent."""
     if traits is None:
         return None
-    
-    # Check for legacy alias
-    if field in _TRAIT_LEGACY_ALIASES:
-        canonical_field = _TRAIT_LEGACY_ALIASES[field]
-        print(f"[DEPRECATION WARNING] Trait '{field}' is deprecated, use '{canonical_field}' instead")
-        field = canonical_field
-    
-    # Dotted-path resolution: "work_permit.countries_authorized" → traits["work_permit"]["countries_authorized"]
-    if "." in field:
-        parts = field.split(".")
-        current = traits
-        
-        for part in parts:
-            if isinstance(current, dict):
-                current = current.get(part)
-            else:
-                current = getattr(current, part, None)
-            
-            if current is None:
-                return None
-        
-        return current
-    
-    # Simple field access (backward compatibility)
     if isinstance(traits, dict):
         return traits.get(field)
     return getattr(traits, field, None)
