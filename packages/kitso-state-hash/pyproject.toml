@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kitso-state-hash"
+version = "0.1.0"
+description = "Reference v0.2 state_hash implementation for the Kitso Handshake protocol. SHA-256 over RFC 8785 (JCS) canonicalised card subsets."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Kitsuno", email = "handshake@kitsuno.ai" }]
+keywords = ["handshake", "hiring", "agents", "a2a", "kitsuno", "idempotency"]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Operating System :: OS Independent",
+    "Topic :: Internet",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://kitsuno.ai/handshake/v0.2/"
+Repository = "https://github.com/kitsuno-ai/kitso-handshake-agents"
+Spec = "https://github.com/kitsuno-ai/kitso-handshake"
+Issues = "https://github.com/kitsuno-ai/kitso-handshake-agents/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

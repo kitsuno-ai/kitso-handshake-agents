@@ -28,6 +28,20 @@ All notable changes to this repo are documented here. Format follows [Keep a Cha
   continue to work via pass-through.
 - **6 new tests** in `tests/test_policy_match.py` covering both additions.
 
+### New package: `kitso-state-hash` v0.1.0
+- Reference Python implementation of the v0.2 `state_hash` primitive
+  (pair-state idempotency).
+- API: `vacancy_state_hash(card)`, `seeker_state_hash(card)`,
+  `canonical_subset_vacancy(card)`, `canonical_subset_seeker(card)`.
+- Algorithm: `lowercase_hex(SHA-256(JCS(canonical_subset(card))))`. JCS per
+  RFC 8785, SHA-256 per FIPS 180-4. Zero runtime dependencies.
+- Spec: §2 of the Kitso Handshake state-hash spec (Pair-State Idempotency).
+- Tests: 26 pass — round-trip determinism, sort stability, missing-optional
+  invariance, §2.4.1 split-shape language flattening, CEFR-aware dedup,
+  unicode pass-through, JCS number normalization, JCS object-key sorting.
+- Golden test vectors: 14 fixtures at `test-fixtures/v0.2/state-hash/` with
+  equivalence groups for cross-language verification.
+
 ### Note on the rename
 There is no external adopter of the protocol yet; this is the right window to
 align names to production. v0.3 will not retain the `work_permit` alias.

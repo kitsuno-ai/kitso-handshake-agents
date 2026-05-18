@@ -1,0 +1,21 @@
+{
+  "spec_version": "v0.2.1",
+  "hash_algorithm": "SHA-256",
+  "canonicalization": "RFC 8785 (JCS)",
+  "vectors": [
+    "see-001-engineering-flat-languages.json",
+    "see-002-engineering-split-languages.json",
+    "see-003-engineering-works-in-ignored.json",
+    "see-004-cefr-dedup-highest-wins.json",
+    "vac-001-direct-hire.json",
+    "vac-002-cosmetic-edits-ignored.json",
+    "vac-003-skill-added-changes-hash.json",
+    "vac-004-skill-order-invariant.json",
+    "vac-005-country-codes-order-invariant.json",
+    "vac-006-missing-optional.json",
+    "vac-007-minimal.json",
+    "vac-008-unicode-role-family.json",
+    "vac-009-integer-float-equiv-int.json",
+    "vac-010-empty-list-not-absent.json"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "kind": "vacancy",
+  "notes": "Smallest plausible vacancy: card_id, skills, country_codes, employment_type. All other fields absent.",
+  "input": {
+    "card_id": "minimal-vacancy-0001",
+    "skills": [
+      "go"
+    ],
+    "country_codes": [
+      "DE"
+    ],
+    "employment_type": "full_time"
+  },
+  "canonical": {
+    "card_id": "minimal-vacancy-0001",
+    "country_codes": [
+      "DE"
+    ],
+    "employment_type": "full_time",
+    "skills": [
+      "go"
+    ]
+  },
+  "canonical_bytes_utf8": "{\"card_id\":\"minimal-vacancy-0001\",\"country_codes\":[\"DE\"],\"employment_type\":\"full_time\",\"skills\":[\"go\"]}",
+  "state_hash": "a2ef95910a4c1fc681aa5b491e5c45b13706e322d4b64bc7d8c1626b7b7514fd"
+}

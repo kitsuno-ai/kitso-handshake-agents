@@ -1,0 +1,23 @@
+{
+  "groups": [
+    {
+      "description": "see-001..004: split-shape and dedup produce the same hash as flat shape",
+      "members": [
+        "see-001-engineering-flat-languages.json",
+        "see-002-engineering-split-languages.json",
+        "see-003-engineering-works-in-ignored.json",
+        "see-004-cefr-dedup-highest-wins.json"
+      ]
+    },
+    {
+      "description": "vac-001 / 002 / 004 / 005 / 009: same canonical state under cosmetic and ordering noise",
+      "members": [
+        "vac-001-direct-hire.json",
+        "vac-002-cosmetic-edits-ignored.json",
+        "vac-004-skill-order-invariant.json",
+        "vac-005-country-codes-order-invariant.json",
+        "vac-009-integer-float-equiv-int.json"
+      ]
+    }
+  ]
+}

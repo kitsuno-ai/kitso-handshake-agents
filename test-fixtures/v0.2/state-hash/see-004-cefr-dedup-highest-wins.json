@@ -1,0 +1,200 @@
+{
+  "kind": "seeker",
+  "notes": "Duplicate language entries in speaks: 'en' appears with both B2 and C1. §2.4.1 rule 2: highest CEFR level wins (Native > C2 > C1 > B2 > B1 > A2 > A1). Canonical languages MUST contain en/C1 (not en/B2) plus de/B2. state_hash MUST equal see-001.",
+  "input": {
+    "card_id": "0193e8b0-1c8f-4a5d-2e91-3f217a90bef0",
+    "slug": "alice-py-senior",
+    "agent_id": "kitsuno.agent/u/alice",
+    "role_targets": [
+      {
+        "role_family": "software_engineering",
+        "role_title_keywords": [
+          "python engineer",
+          "platform engineer",
+          "backend engineer"
+        ],
+        "seniority_range": [
+          "senior",
+          "lead"
+        ]
+      }
+    ],
+    "skills": [
+      "python",
+      "kubernetes",
+      "postgres",
+      "system_design",
+      "event_driven_architecture"
+    ],
+    "languages": {
+      "speaks": [
+        {
+          "language": "en",
+          "level": "B2"
+        },
+        {
+          "language": "en",
+          "level": "C1"
+        },
+        {
+          "language": "de",
+          "level": "B2"
+        }
+      ],
+      "works_in": [
+        "en",
+        "de"
+      ]
+    },
+    "geography": {
+      "countries": [
+        "CH",
+        "DE",
+        "AT"
+      ],
+      "cities": [
+        "Zurich",
+        "Berlin"
+      ],
+      "willing_to_relocate": false
+    },
+    "work_mode": {
+      "accepts": [
+        "remote",
+        "hybrid"
+      ],
+      "max_onsite_days_per_week": 2
+    },
+    "employment_types": [
+      "full_time",
+      "contract"
+    ],
+    "salary_expectation": {
+      "min": {
+        "amount": 85000,
+        "currency": "EUR",
+        "period": "year"
+      },
+      "negotiable": true
+    },
+    "availability": {
+      "earliest_start_date": "2026-07-01",
+      "notice_period_days": 30
+    },
+    "verification": {
+      "method": "email+dns",
+      "tier": "domain_verified",
+      "verified_at": "2026-05-15T08:00:00Z",
+      "verifier": "kitsuno.ai"
+    },
+    "consent_policy": {
+      "agent_may_signal_interest_without_human_review": true,
+      "agent_may_disclose_l2_without_human_review": true,
+      "agent_may_release_l3_without_human_review": false,
+      "scope_expires_at": "2026-08-15T00:00:00Z"
+    },
+    "published_at": "2026-05-15T08:00:00Z",
+    "expires_at": "2026-08-15T08:00:00Z",
+    "work_rights": {
+      "countries_authorized": [
+        "AT",
+        "BE",
+        "CH",
+        "DE",
+        "DK",
+        "ES",
+        "FI",
+        "FR",
+        "IE",
+        "IT",
+        "LU",
+        "NL",
+        "NO",
+        "PT",
+        "SE"
+      ],
+      "sponsorship_required": false
+    }
+  },
+  "canonical": {
+    "card_id": "0193e8b0-1c8f-4a5d-2e91-3f217a90bef0",
+    "employment_types": [
+      "contract",
+      "full_time"
+    ],
+    "geography": {
+      "countries": [
+        "AT",
+        "CH",
+        "DE"
+      ]
+    },
+    "languages": [
+      {
+        "language": "de",
+        "level": "B2"
+      },
+      {
+        "language": "en",
+        "level": "C1"
+      }
+    ],
+    "role_targets": [
+      {
+        "role_family": "software_engineering",
+        "seniority_range": [
+          "lead",
+          "senior"
+        ],
+        "role_title_keywords": [
+          "backend engineer",
+          "platform engineer",
+          "python engineer"
+        ]
+      }
+    ],
+    "salary_expectation": {
+      "min": {
+        "amount": 85000,
+        "currency": "EUR",
+        "period": "year"
+      }
+    },
+    "skills": [
+      "event_driven_architecture",
+      "kubernetes",
+      "postgres",
+      "python",
+      "system_design"
+    ],
+    "work_mode": {
+      "accepts": [
+        "hybrid",
+        "remote"
+      ],
+      "max_onsite_days_per_week": 2
+    },
+    "work_rights": {
+      "countries_authorized": [
+        "AT",
+        "BE",
+        "CH",
+        "DE",
+        "DK",
+        "ES",
+        "FI",
+        "FR",
+        "IE",
+        "IT",
+        "LU",
+        "NL",
+        "NO",
+        "PT",
+        "SE"
+      ],
+      "sponsorship_required": false
+    }
+  },
+  "canonical_bytes_utf8": "{\"card_id\":\"0193e8b0-1c8f-4a5d-2e91-3f217a90bef0\",\"employment_types\":[\"contract\",\"full_time\"],\"geography\":{\"countries\":[\"AT\",\"CH\",\"DE\"]},\"languages\":[{\"language\":\"de\",\"level\":\"B2\"},{\"language\":\"en\",\"level\":\"C1\"}],\"role_targets\":[{\"role_family\":\"software_engineering\",\"role_title_keywords\":[\"backend engineer\",\"platform engineer\",\"python engineer\"],\"seniority_range\":[\"lead\",\"senior\"]}],\"salary_expectation\":{\"min\":{\"amount\":85000,\"currency\":\"EUR\",\"period\":\"year\"}},\"skills\":[\"event_driven_architecture\",\"kubernetes\",\"postgres\",\"python\",\"system_design\"],\"work_mode\":{\"accepts\":[\"hybrid\",\"remote\"],\"max_onsite_days_per_week\":2},\"work_rights\":{\"countries_authorized\":[\"AT\",\"BE\",\"CH\",\"DE\",\"DK\",\"ES\",\"FI\",\"FR\",\"IE\",\"IT\",\"LU\",\"NL\",\"NO\",\"PT\",\"SE\"],\"sponsorship_required\":false}}",
+  "state_hash": "a840b66a5901c1a3a832b50f02f40a0f07fd06813f5287b6cf51d710473028c8"
+}
