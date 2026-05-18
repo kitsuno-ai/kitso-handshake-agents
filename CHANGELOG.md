@@ -2,6 +2,33 @@
 
 All notable changes to this repo are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [v0.2.2] — 2026-05-19
+
+### New package: `handshake-validator` v0.1.0
+- Reference implementation of the v0.2 handshake validator — the L2 →
+  L3-eligible quality gate that decides which handshakes are worth
+  surfacing to a human.
+- API:
+  - `HandshakeValidator` abstract base class — operators subclass and plug in
+    their own classifier.
+  - `RuleBasedValidator` — deterministic, no-LLM, no-network reference. Scores
+    against the four protocol dimensions (role_alignment, seniority_fit,
+    skill_overlap, context_fit) using only the structured fields in the
+    v0.2 card schemas.
+  - `Verdict` frozen dataclass — three-bucket verdict (strong_fit / weak_fit
+    / no_fit), one-sentence sanitised reason, structured per-dimension grades,
+    `low_signal` flag for thin-data vacancies (description < ~800 chars).
+- `examples/llm_validator_template.py` — teaching scaffold showing the shape
+  of an LLM-backed validator with placeholders marked `# TUNE THIS` for
+  rubric, model selection, and JSON parsing. Generic, not Kitsuno's recipe.
+- 12 fixture-driven tests covering: aligned-pair STRONG, family-only PARTIAL,
+  family-miss NO_FIT, seniority distance grading, low-signal flagging,
+  country exclusion / global scope, verdict serialisation, reason
+  sanitisation.
+- Spec: §validator of `kitso-handshake` v0.2.2 (additive; existing
+  conversations without validator metadata still parse).
+- Apache-2.0. Zero runtime dependencies.
+
 ## [v0.2.1] — 2026-05-19
 
 ### Changed
