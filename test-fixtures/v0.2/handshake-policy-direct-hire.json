@@ -4,7 +4,7 @@
   "criteria": [
     { "field": "skills", "operator": "any", "values": ["python"], "gate": "hard" },
     { "field": "years_experience", "operator": "gte", "value": 5, "gate": "soft" },
-    { "field": "work_permit.countries_authorized", "operator": "in", "values": ["EU", "CH"], "gate": "hard" },
+    { "field": "work_rights.countries_authorized", "operator": "in", "values": ["EU", "CH"], "gate": "hard" },
     { "field": "salary_expectation.min.amount", "operator": "lte", "value": 120000, "gate": "soft" }
   ]
 }

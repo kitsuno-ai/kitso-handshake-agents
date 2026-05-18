@@ -166,18 +166,18 @@ def test_present_operator():
     """present passes when the trait is declared, fails when empty."""
     has = evaluate(
         card_policy={"criteria": [
-            {"field": "work_permit", "operator": "present", "gate": "hard"}
+            {"field": "work_rights", "operator": "present", "gate": "hard"}
         ]},
         card_traits={},
         seeker_policy={"criteria": []},
-        seeker_traits={"work_permit": "EU"},
+        seeker_traits={"work_rights": "EU"},
         stage="L1",
     )
     assert has["outcome"] == FIRE_L1
 
     lacks = evaluate(
         card_policy={"criteria": [
-            {"field": "work_permit", "operator": "present", "gate": "hard"}
+            {"field": "work_rights", "operator": "present", "gate": "hard"}
         ]},
         card_traits={},
         seeker_policy={"criteria": []},
@@ -200,3 +200,111 @@ def test_result_shape():
     )
     assert set(result.keys()) >= {"outcome", "stage", "matched_criteria", "blocking_criteria"}
     assert result["stage"] == "L1"
+
+
+# ─ v0.2.1 additions ─────────────────────────────────────────────────────────
+
+def test_any_default_min_matches_is_one():
+    """`any` operator without explicit min_matches matches with single overlap."""
+    result = evaluate(
+        card_policy={"criteria": [
+            {"field": "skills", "operator": "any",
+             "values": ["python", "go", "rust"], "gate": "hard"}
+        ]},
+        card_traits={},
+        seeker_policy={"criteria": []},
+        seeker_traits={"skills": ["python", "javascript"]},
+        stage="L1",
+    )
+    assert result["outcome"] == "FIRE_L1", result
+
+
+def test_any_min_matches_two_succeeds_when_overlap_two():
+    """`min_matches: 2` succeeds when seeker has 2+ of the listed skills."""
+    result = evaluate(
+        card_policy={"criteria": [
+            {"field": "skills", "operator": "any",
+             "values": ["python", "kubernetes", "postgres"],
+             "min_matches": 2, "gate": "hard"}
+        ]},
+        card_traits={},
+        seeker_policy={"criteria": []},
+        seeker_traits={"skills": ["python", "kubernetes", "rust"]},
+        stage="L1",
+    )
+    assert result["outcome"] == "FIRE_L1", result
+
+
+def test_any_min_matches_two_blocks_when_overlap_one():
+    """`min_matches: 2` blocks when seeker only has 1 of the listed skills."""
+    result = evaluate(
+        card_policy={"criteria": [
+            {"field": "skills", "operator": "any",
+             "values": ["python", "kubernetes", "postgres"],
+             "min_matches": 2, "gate": "hard"}
+        ]},
+        card_traits={},
+        seeker_policy={"criteria": []},
+        seeker_traits={"skills": ["python", "rust"]},
+        stage="L1",
+    )
+    assert result["outcome"] == "BLOCK_L1", result
+    assert result["blocking_criteria"], "should record what blocked"
+    reason = result["blocking_criteria"][0].get("reason", "")
+    assert "1 of required 2" in reason or "only 1" in reason, reason
+
+
+def test_split_trait_languages_unwraps_works_in():
+    """Languages stored as {speaks, works_in} split shape: criterion against
+    `languages` is evaluated against the `works_in` inner list."""
+    result = evaluate(
+        card_policy={"criteria": [
+            {"field": "languages", "operator": "any",
+             "values": ["en", "de"], "gate": "hard"}
+        ]},
+        card_traits={},
+        seeker_policy={"criteria": []},
+        seeker_traits={"languages": {
+            "speaks": [{"language": "fr", "level": "Native"},
+                       {"language": "en", "level": "C2"}],
+            "works_in": ["en", "fr"],
+        }},
+        stage="L1",
+    )
+    # works_in = [en, fr]; criterion accepts [en, de] — en overlaps → match
+    assert result["outcome"] == "FIRE_L1", result
+
+
+def test_split_trait_languages_legacy_list_still_works():
+    """Legacy languages shape ([{language, level}, ...] or [code, ...]) must
+    continue to evaluate correctly — pass-through path."""
+    result = evaluate(
+        card_policy={"criteria": [
+            {"field": "languages", "operator": "any",
+             "values": ["en"], "gate": "hard"}
+        ]},
+        card_traits={},
+        seeker_policy={"criteria": []},
+        seeker_traits={"languages": ["en", "de"]},
+        stage="L1",
+    )
+    assert result["outcome"] == "FIRE_L1", result
+
+
+def test_split_trait_languages_works_in_misses():
+    """If works_in does not overlap with criterion, BLOCK as expected."""
+    result = evaluate(
+        card_policy={"criteria": [
+            {"field": "languages", "operator": "any",
+             "values": ["de"], "gate": "hard"}
+        ]},
+        card_traits={},
+        seeker_policy={"criteria": []},
+        seeker_traits={"languages": {
+            "speaks": [{"language": "de", "level": "Native"}],
+            "works_in": ["en"],  # speaks German but only works in English
+        }},
+        stage="L1",
+    )
+    assert result["outcome"] == "BLOCK_L1", result
+

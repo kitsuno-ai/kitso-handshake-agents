@@ -21,7 +21,7 @@ VACANCY_CARD = {
              "values": ["python"], "gate": "hard"},
             {"field": "salary_min", "operator": "lte",
              "value": 100000, "gate": "soft"},
-            {"field": "work_permit", "operator": "in",
+            {"field": "work_rights", "operator": "in",
              "values": ["EU", "CH"], "gate": "hard"},
         ]
     },
@@ -44,7 +44,7 @@ SEEKER_CARD = {
     "traits": {
         "languages": ["python", "go", "rust"],
         "salary_min": 85000,
-        "work_permit": "EU",
+        "work_rights": "EU",
     },
 }
 

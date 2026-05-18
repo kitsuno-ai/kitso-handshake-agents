@@ -2,7 +2,7 @@
 
 Pure function, no DB, no network, sub-millisecond.
 
-Spec reference: /opt/sf4l-staging/docs/vacancy-cards-v0.2-spec.md §5.5
+Spec reference: https://github.com/kitsuno-ai/kitso-handshake-agents/blob/main/docs/protocol-v0.2.md  (§5.5)
 
 The evaluator pairs both sides field-by-field using a shared vocabulary (§5.1)
 and a closed operator set (§5.3). It runs symmetrically: vacancy's criteria
@@ -49,7 +49,7 @@ _REGION_TAG_EXPANSIONS: dict[str, frozenset[str]] = {
 }
 
 # Fields where EU/EFTA tags should auto-expand to ISO-2 sets
-_REGION_AWARE_FIELDS = frozenset({"work_permit", "country", "country_codes", "city"})
+_REGION_AWARE_FIELDS = frozenset({"work_rights", "country", "country_codes", "city"})
 
 # ── Outcome constants ────────────────────────────────────────────────────────
 FIRE_L1 = "FIRE_L1"
@@ -88,7 +88,7 @@ def _expand_region_tags(values: Iterable[Any]) -> set[str]:
 
 # Legacy trait name aliases (S337 — 30d deprecation window)
 _TRAIT_LEGACY_ALIASES = {
-    "work_permit": "work_permit.countries_authorized",
+    "work_permit": "work_rights.countries_authorized",
     "salary_min": "salary_expectation.min.amount",
 }
 
@@ -96,7 +96,7 @@ _TRAIT_LEGACY_ALIASES = {
 def _get_trait(traits: Any, field: str) -> Any:
     """Read a trait from a dict or attribute-bearing object. 
     
-    Supports dotted-path resolution (e.g. "work_permit.countries_authorized").
+    Supports dotted-path resolution (e.g. "work_rights.countries_authorized").
     Legacy flat names are mapped to canonical paths during deprecation window.
     Returns None if absent.
     """
@@ -109,7 +109,7 @@ def _get_trait(traits: Any, field: str) -> Any:
         print(f"[DEPRECATION WARNING] Trait '{field}' is deprecated, use '{canonical_field}' instead")
         field = canonical_field
     
-    # Dotted-path resolution: "work_permit.countries_authorized" → traits["work_permit"]["countries_authorized"]
+    # Dotted-path resolution: "work_rights.countries_authorized" → traits["work_rights"]["countries_authorized"]
     if "." in field:
         parts = field.split(".")
         current = traits
@@ -129,6 +129,26 @@ def _get_trait(traits: Any, field: str) -> Any:
     if isinstance(traits, dict):
         return traits.get(field)
     return getattr(traits, field, None)
+
+
+# Fields whose trait value is a split-shape dict: criteria evaluate against
+# a specific inner key, not the dict itself. Currently only `languages` —
+# {speaks: [...], works_in: [...]} — where `works_in` is the work-language gate.
+_TRAIT_SPLIT_INNER = {
+    "languages": "works_in",
+}
+
+
+def _unwrap_split_trait(value: Any, field: str) -> Any:
+    """If `value` is the S345 split-shape dict for this field, return the inner
+    gate list. Otherwise pass through unchanged so legacy list/string shapes
+    continue to work."""
+    inner = _TRAIT_SPLIT_INNER.get(field)
+    if not inner:
+        return value
+    if isinstance(value, dict) and inner in value:
+        return value.get(inner) or []
+    return value
 
 
 def _normalize_trait_to_set(value: Any, field: str) -> set[str]:
@@ -191,6 +211,9 @@ def _evaluate_criterion(criterion: dict, traits: Any) -> dict:
         return {**result, "outcome": UNKNOWN, "reason": "criterion has no field"}
 
     trait_val = _get_trait(traits, field)
+    # S345: unwrap split-shape traits (e.g. languages -> works_in) before
+    # any operator runs. Pure pass-through for non-split fields.
+    trait_val = _unwrap_split_trait(trait_val, field)
 
     # ── present / absent ─────────────────────────────────────────
     if op == "present":
@@ -253,10 +276,18 @@ def _evaluate_criterion(criterion: dict, traits: Any) -> dict:
                 "reason": f"{field} contains disallowed: {sorted(overlap)}"}
 
     if op == "any":
-        if trait_set & crit_set:
-            return {**result, "outcome": MATCH}
+        # min_matches >= 1 (default 1) — caller can require multiple overlaps
+        overlap = trait_set & crit_set
+        min_matches = criterion.get("min_matches", 1)
+        try:
+            min_matches = int(min_matches)
+        except (TypeError, ValueError):
+            min_matches = 1
+        if len(overlap) >= min_matches:
+            return {**result, "outcome": MATCH,
+                    "reason": f"{len(overlap)} of required {min_matches}: {sorted(overlap)}"}
         return {**result, "outcome": MISMATCH,
-                "reason": f"none of {sorted(crit_set)} in seeker's {field}"}
+                "reason": f"only {len(overlap)} of required {min_matches} in seeker's {field} (overlap={sorted(overlap)})"}
 
     if op == "all":
         missing = crit_set - trait_set
@@ -283,7 +314,7 @@ def evaluate(
       card_policy:    vacancy's criteria. None or {"criteria": []} = unfiltered.
       card_traits:    vacancy's own traits (role_family, country_code, etc.).
       seeker_policy:  seeker's criteria. None or empty = no seeker filters.
-      seeker_traits:  seeker's own traits (work_permit, languages, etc.).
+      seeker_traits:  seeker's own traits (work_rights, languages, etc.).
       stage:          "L1" (initial) or "L2" (post-vacancy-signal escalation).
 
     Returns dict:
